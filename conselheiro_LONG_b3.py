@@ -11,7 +11,7 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Conselheiro B3 Resiliente", page_icon="🏢", layout="centered")
 
 st.sidebar.header("⚙️ Parâmetros da Ação")
-SIMBOLO = st.sidebar.text_input("Ação (ex: VALE3.SA)", value="VALE3.SA").upper().strip()
+SIMBOLO = st.sidebar.text_input("Ação (ex: VALE3.SA)", value="").upper().strip()
 
 st.sidebar.markdown("---")
 st.sidebar.header("🛡️ Gestão de Risco")
