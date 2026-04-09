@@ -15,7 +15,8 @@ st.set_page_config(page_title="Conselheiro B3", page_icon="🏢", layout="center
 # ==========================================
 st.sidebar.header("⚙️ Parâmetros da Ação")
 st.sidebar.markdown("*(Lembre-se de colocar **.SA** no final do código)*")
-SIMBOLO = st.sidebar.text_input("Ação (ex: VALE3.SA, ITUB4.SA)", value="VALE3.SA").upper()
+# O .strip() garante que espaços vazios não causem erro na pesquisa
+SIMBOLO = st.sidebar.text_input("Ação (ex: VALE3.SA, ITUB4.SA)", value="VALE3.SA").upper().strip()
 
 st.sidebar.markdown("---")
 st.sidebar.header("🛡️ Gestão de Risco (Gabarito B3)")
@@ -29,32 +30,53 @@ RSI_MAX_ENTRADA = st.sidebar.number_input("RSI Máx. (Promoção)", min_value=30
 # ==========================================
 @st.cache_data(ttl=300) 
 def obter_dados_b3(ticker):
-    # Baixa 100 pregões para garantir espaço para a Média de 50
-    df = yf.download(ticker, period='100d', interval='1d', progress=False)
-    
-    if df.empty: 
-        return None
-    
-    # Tratamento para a nova estrutura de colunas do yfinance
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.droplevel(1)
+    try:
+        # Baixa 150 dias para garantir dados suficientes para a SMA 50
+        df = yf.download(ticker, period='150d', interval='1d', progress=False)
         
-    df = df.reset_index()
-    # Renomeia para o padrão que o nosso algoritmo já entende
-    df.rename(columns={'Date': 'data', 'Open': 'abertura', 'High': 'maxima', 'Low': 'minima', 'Close': 'fechamento', 'Volume': 'volume'}, inplace=True)
-    
-    # Indicadores Técnicos
-    df['ema_rapida'] = df['fechamento'].ewm(span=9, adjust=False).mean()
-    df['ema_lenta'] = df['fechamento'].ewm(span=21, adjust=False).mean()
-    df['sma_50'] = df['fechamento'].rolling(window=50).mean()
-    
-    delta = df['fechamento'].diff()
-    ganho = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    perda = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = ganho / perda
-    df['rsi'] = 100 - (100 / (1 + rs))
-    
-    return df.dropna()
+        if df.empty or len(df) < 50: 
+            return None
+        
+        # Tratamento Universal de Colunas (Evita o erro da VALE3)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [col[0] for col in df.columns]
+        
+        df = df.reset_index()
+        
+        # Mapeamento Dinâmico (Procura Adj Close primeiro, depois Close)
+        if 'Adj Close' in df.columns:
+            df.rename(columns={'Adj Close': 'fechamento'}, inplace=True)
+        elif 'Close' in df.columns:
+            df.rename(columns={'Close': 'fechamento'}, inplace=True)
+            
+        df.rename(columns={
+            'Date': 'data', 
+            'Open': 'abertura', 
+            'High': 'maxima', 
+            'Low': 'minima', 
+            'Volume': 'volume'
+        }, inplace=True)
+        
+        # Cálculo dos Indicadores Técnicos
+        df['ema_rapida'] = df['fechamento'].ewm(span=9, adjust=False).mean()
+        df['sma_50'] = df['fechamento'].rolling(window=50).mean()
+        
+        delta = df['fechamento'].diff()
+        ganho = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        perda = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = ganho / perda
+        df['rsi'] = 100 - (100 / (1 + rs))
+        
+        # Remove as linhas sem média
+        df_final = df.dropna()
+        
+        if len(df_final) == 0:
+            return None
+            
+        return df_final
+    except Exception as e:
+        st.sidebar.error(f"Erro técnico ao processar {ticker}: {e}")
+        return None
 
 # ==========================================
 # 4. INTERFACE PRINCIPAL
@@ -64,12 +86,12 @@ st.markdown("Transforme os relatórios do seu Otimizador em ordens precisas na c
 st.markdown("---")
 
 if st.sidebar.button("Analisar Ação", type="primary", use_container_width=True):
-    with st.spinner(f"A descarregar dados da B3 para {SIMBOLO}..."):
+    with st.spinner(f"A extrair dados da B3 para {SIMBOLO}..."):
         try:
             df = obter_dados_b3(SIMBOLO)
             
             if df is None:
-                st.error("⚠️ Símbolo não encontrado ou sem dados. Esqueceu-se do '.SA' no final?")
+                st.error("⚠️ Símbolo não encontrado ou sem dados. Esqueceu-se do '.SA' no final? Certifique-se também de que não há espaços em branco no campo de pesquisa.")
             else:
                 atual = df.iloc[-1]
                 anterior = df.iloc[-2]
@@ -91,7 +113,7 @@ if st.sidebar.button("Analisar Ação", type="primary", use_container_width=True
                     alerta = st.success
                 elif tendencia_alta and acao_corrigiu and not rompeu_ema9:
                     recomendacao = "👀 PREPARAR COMPRA (Aguardar Gatilho)"
-                    status = "A ação está muito barata (Desconto), mas ainda a cair. Aguarde o fechamento do dia acima da EMA 9."
+                    status = "A ação está muito barata (Desconto), mas ainda a cair. Aguarde o fecho do dia acima da EMA 9."
                     alerta = st.info
                 elif tendencia_alta and not acao_corrigiu:
                     recomendacao = "⏳ MANTER / NÃO COMPRAR MAIS (Esticada)"
@@ -123,6 +145,6 @@ if st.sidebar.button("Analisar Ação", type="primary", use_container_width=True
                 st.caption(f"Dados atualizados com o último fecho do mercado. ({datetime.now().strftime('%d/%m %H:%M')})")
 
         except Exception as e:
-            st.error(f"Ocorreu um erro no cálculo da estratégia. Detalhes: {e}")
+            st.error(f"Ocorreu um erro inesperado no cálculo. Detalhes: {e}")
 else:
     st.write("👈 Insira o código da ação no menu lateral, ajuste os parâmetros do gabarito e clique em **Analisar Ação**.")
