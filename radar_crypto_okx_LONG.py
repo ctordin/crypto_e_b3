@@ -17,7 +17,9 @@ st.markdown("---")
 
 PORTFOLIO = {
     'SOL/USDT', 'BTC/USDT', 'ETH/USDT', 'AVAX/USDT', 'LINK/USDT',
-    'ADA/USDT', 'DOGE/USDT', 'DOT/USDT', 'XRP/USDT', 'POL/USDT'
+    'ADA/USDT', 'DOGE/USDT', 'DOT/USDT', 'XRP/USDT', 'POL/USDT',
+    'SOL/USD', 'BTC/USD', 'ETH/USD', 'AVAX/USD', 'LINK/USD',
+    'ADA/USD', 'DOGE/USD', 'DOT/USD', 'XRP/USD', 'POL/USD'
 }
 
 # ==========================================
