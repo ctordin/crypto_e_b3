@@ -16,10 +16,16 @@ st.markdown("Scanner automático de **Pullbacks (Correções)** no Gráfico Diá
 st.markdown("---")
 
 PORTFOLIO = {
-    'SOL/USDT', 'BTC/USDT', 'ETH/USDT', 'AVAX/USDT', 'LINK/USDT',
-    'ADA/USDT', 'DOGE/USDT', 'DOT/USDT', 'XRP/USDT', 'POL/USDT',
-    'SOL-USD', 'BTC-USD', 'ETH-USD', 'AVAX-USD', 'LINK-USD',
-    'ADA-USD', 'DOGE-USD', 'DOT-USD', 'XRP-USD', 'POL-USD'
+    'SOL/USDT': 'SOL-USD',
+    'BTC/USDT': 'BTC-USD',
+    'ETH/USDT': 'ETH-USD',
+    'AVAX/USDT': 'AVAX-USD',
+    'LINK/USDT': 'LINK-USD',
+    'ADA/USDT': 'ADA-USD',
+    'DOGE/USDT': 'DOGE-USD',
+    'DOT/USDT': 'DOT-USD',
+    'XRP/USDT': 'XRP-USD',
+    'POL/USDT': 'POL-USD'
 }
 
 # ==========================================
