@@ -15,8 +15,8 @@ st.markdown("Scanner de **Swing Trade**: Técnico (RSI/Médias) + Fundamentalist
 st.markdown("---")
 
 LISTA_ACOES = [
-    'PETR4.SA', 'VALE3.SA', 'ITUB4.SA', 'BBDC4.SA', 'BBAS3.SA',
-    'WEGE3.SA', 'ABEV3.SA', 'RENT3.SA', 'SUZB3.SA', 'RADL3.SA', 'ALOS3.SA'
+    'PETR4.SA', 'VALE3.SA', 'ITUB4.SA', 'MBRF3.SA', 'TOTS3.SA',
+    'WEGE3.SA', 'ABEV3.SA', 'RENT3.SA', 'SUZB3.SA', 'NATU3.SA', 'ALOS3.SA'
 ]
 
 # ==========================================
