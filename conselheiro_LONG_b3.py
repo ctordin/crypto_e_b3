@@ -8,143 +8,118 @@ warnings.filterwarnings('ignore')
 # ==========================================
 # 1. CONFIGURAÇÃO DA PÁGINA WEB
 # ==========================================
-st.set_page_config(page_title="Conselheiro B3", page_icon="🏢", layout="centered")
+st.set_page_config(page_title="Conselheiro B3 Quantamental", page_icon="🏢", layout="centered")
 
 # ==========================================
 # 2. BARRA LATERAL (MENU INTERATIVO)
 # ==========================================
 st.sidebar.header("⚙️ Parâmetros da Ação")
-st.sidebar.markdown("*(Lembre-se de colocar **.SA** no final do código)*")
-# O .strip() garante que espaços vazios não causem erro na pesquisa
 SIMBOLO = st.sidebar.text_input("Ação (ex: VALE3.SA, ITUB4.SA)", value="VALE3.SA").upper().strip()
 
 st.sidebar.markdown("---")
-st.sidebar.header("🛡️ Gestão de Risco (Gabarito B3)")
-# Valores padrão ajustados para a volatilidade típica da B3
+st.sidebar.header("🛡️ Gestão de Risco (Gabarito)")
 STOP_LOSS_PCT = st.sidebar.number_input("Stop Loss (%)", min_value=1.0, max_value=15.0, value=5.0, step=1.0) / 100.0
 TRAILING_STOP_PCT = st.sidebar.number_input("Trailing Stop (%)", min_value=1.0, max_value=30.0, value=10.0, step=1.0) / 100.0
 RSI_MAX_ENTRADA = st.sidebar.number_input("RSI Máx. (Promoção)", min_value=30, max_value=80, value=55, step=1)
 
 # ==========================================
-# 3. LÓGICA DE DADOS (Motor Quantitativo Yahoo Finance)
+# 3. MOTOR DE DADOS (FUNDAMENTOS + GRÁFICO)
 # ==========================================
-@st.cache_data(ttl=300) 
-def obter_dados_b3(ticker):
+@st.cache_data(ttl=3600)
+def obter_fundamentos(ticker):
     try:
-        # Baixa 150 dias para garantir dados suficientes para a SMA 50
+        acao = yf.Ticker(ticker)
+        info = acao.info
+        dados = {
+            "pl": info.get('forwardPE') or info.get('trailingPE') or 0,
+            "dy": (info.get('dividendYield') or 0) * 100,
+            "margem": (info.get('profitMargins') or 0) * 100,
+            "saudavel": (info.get('profitMargins') or 0) > 0.05 and (info.get('forwardPE') or 100) < 25
+        }
+        return dados
+    except:
+        return None
+
+@st.cache_data(ttl=300) 
+def obter_dados_graficos(ticker):
+    try:
         df = yf.download(ticker, period='150d', interval='1d', progress=False)
-        
-        if df.empty or len(df) < 50: 
-            return None
-        
-        # Tratamento Universal de Colunas (Evita o erro da VALE3)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [col[0] for col in df.columns]
-        
+        if df.empty or len(df) < 50: return None
+        if isinstance(df.columns, pd.MultiIndex): df.columns = [col[0] for col in df.columns]
         df = df.reset_index()
+        fechamento = 'Adj Close' if 'Adj Close' in df.columns else 'Close'
+        df.rename(columns={fechamento: 'fechamento', 'Date': 'data'}, inplace=True)
         
-        # Mapeamento Dinâmico (Procura Adj Close primeiro, depois Close)
-        if 'Adj Close' in df.columns:
-            df.rename(columns={'Adj Close': 'fechamento'}, inplace=True)
-        elif 'Close' in df.columns:
-            df.rename(columns={'Close': 'fechamento'}, inplace=True)
-            
-        df.rename(columns={
-            'Date': 'data', 
-            'Open': 'abertura', 
-            'High': 'maxima', 
-            'Low': 'minima', 
-            'Volume': 'volume'
-        }, inplace=True)
-        
-        # Cálculo dos Indicadores Técnicos
-        df['ema_rapida'] = df['fechamento'].ewm(span=9, adjust=False).mean()
+        df['ema_9'] = df['fechamento'].ewm(span=9, adjust=False).mean()
         df['sma_50'] = df['fechamento'].rolling(window=50).mean()
         
         delta = df['fechamento'].diff()
         ganho = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         perda = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = ganho / perda
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
-        # Remove as linhas sem média
-        df_final = df.dropna()
-        
-        if len(df_final) == 0:
-            return None
-            
-        return df_final
-    except Exception as e:
-        st.sidebar.error(f"Erro técnico ao processar {ticker}: {e}")
+        df['rsi'] = 100 - (100 / (1 + (ganho/perda)))
+        return df.dropna()
+    except:
         return None
 
 # ==========================================
 # 4. INTERFACE PRINCIPAL
 # ==========================================
-st.title("🏢 Conselheiro B3 - Swing Trade")
-st.markdown("Transforme os relatórios do seu Otimizador em ordens precisas na corretora.")
+st.title("🏢 Conselheiro B3 Quantamental")
+st.markdown("Análise final de saúde financeira e pontos de entrada.")
 st.markdown("---")
 
 if st.sidebar.button("Analisar Ação", type="primary", use_container_width=True):
-    with st.spinner(f"A extrair dados da B3 para {SIMBOLO}..."):
-        try:
-            df = obter_dados_b3(SIMBOLO)
-            
-            if df is None:
-                st.error("⚠️ Símbolo não encontrado ou sem dados. Esqueceu-se do '.SA' no final? Certifique-se também de que não há espaços em branco no campo de pesquisa.")
-            else:
-                atual = df.iloc[-1]
-                anterior = df.iloc[-2]
+    fund = obter_fundamentos(SIMBOLO)
+    df = obter_dados_graficos(SIMBOLO)
 
-                preco = float(atual['fechamento'])
+    if fund and df is not None:
+        atual = df.iloc[-1]
+        anterior = df.iloc[-2]
+        preco = float(atual['fechamento'])
 
-                # Verificações da Estratégia de Pullback
-                tendencia_alta = preco > float(atual['sma_50'])
-                acao_corrigiu = float(atual['rsi']) < RSI_MAX_ENTRADA
-                rompeu_ema9 = preco > float(atual['ema_rapida']) and float(anterior['fechamento']) <= float(anterior['ema_rapida'])
+        # Bloco Fundamentalista
+        st.subheader("📊 Saúde da Empresa (Fundamentos)")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("P/L (Preço/Lucro)", f"{fund['pl']:.1f}")
+        c2.metric("Dividend Yield", f"{fund['dy']:.1f}%")
+        c3.metric("Margem Líquida", f"{fund['margem']:.1f}%")
 
-                valor_stop_loss = preco * (1 - STOP_LOSS_PCT)
-                valor_alvo_trailing = preco * (1 + TRAILING_STOP_PCT)
+        if not fund['saudavel']:
+            st.warning("⚠️ **Aviso:** Esta empresa possui fundamentos fora do padrão ideal (Margem baixa ou P/L muito alto).")
+        
+        st.markdown("---")
 
-                # Lógica de Recomendação Visual
-                if tendencia_alta and acao_corrigiu and rompeu_ema9:
-                    recomendacao = "🟢 COMPRA IMEDIATA (Gatilho Acionado!)"
-                    status = "A ação está em tendência de alta macro, corrigiu bem nos últimos dias e retomou a força hoje."
-                    alerta = st.success
-                elif tendencia_alta and acao_corrigiu and not rompeu_ema9:
-                    recomendacao = "👀 PREPARAR COMPRA (Aguardar Gatilho)"
-                    status = "A ação está muito barata (Desconto), mas ainda a cair. Aguarde o fecho do dia acima da EMA 9."
-                    alerta = st.info
-                elif tendencia_alta and not acao_corrigiu:
-                    recomendacao = "⏳ MANTER / NÃO COMPRAR MAIS (Esticada)"
-                    status = "A ação já subiu bastante recentemente. Deixe o seu Trailing Stop fluir. Não compre novos lotes aqui."
-                    alerta = st.warning
-                else:
-                    recomendacao = "🔴 FORA DO MERCADO (Tendência de Baixa)"
-                    status = "A maré está contra. A ação está a ser negociada abaixo da sua média principal de 50 dias."
-                    alerta = st.error
+        # Lógica Técnica
+        tendencia_alta = preco > float(atual['sma_50'])
+        em_promocao = float(atual['rsi']) < RSI_MAX_ENTRADA
+        rompeu_ema9 = preco > float(atual['ema_9']) and float(anterior['fechamento']) <= float(anterior['ema_9'])
 
-                # Renderizar resultados no ecrã
-                st.subheader(recomendacao)
-                alerta(status)
+        if tendencia_alta and em_promocao and rompeu_ema9:
+            st.success("🚀 **GATILHO DE COMPRA ACIONADO!**\n\nAtivo em tendência de alta, com desconto e retomada de força.")
+            recomendacao = "COMPRA"
+        elif tendencia_alta and em_promocao:
+            st.info("👀 **PREPARAR COMPRA**\n\nAtivo barato, mas ainda sem sinal de virada no preço. Aguarde romper a EMA 9.")
+            recomendacao = "ESPERAR"
+        else:
+            st.error("❌ **NÃO COMPRAR**\n\nO ativo está esticado ou em tendência de baixa.")
+            recomendacao = "FORA"
 
-                st.markdown("### 📊 Radiografia do Ativo")
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Preço Atual", f"R$ {preco:.2f}")
-                col2.metric("Média Macro (50)", f"R$ {atual['sma_50']:.2f}", "Alta" if preco > atual['sma_50'] else "-Baixa")
-                col3.metric(f"RSI (Max {RSI_MAX_ENTRADA})", f"{atual['rsi']:.1f}", "Promoção" if atual['rsi'] < RSI_MAX_ENTRADA else "-Caro")
+        # Radiografia Técnica
+        st.subheader("📈 Radiografia Técnica")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Preço Atual", f"R$ {preco:.2f}")
+        col2.metric("Tendência (50)", "Alta" if tendencia_alta else "Baixa")
+        col3.metric(f"RSI (Max {RSI_MAX_ENTRADA})", f"{atual['rsi']:.1f}")
 
-                # Exibe as ferramentas de gestão de risco se a tendência for favorável
-                if "COMPRA" in recomendacao:
-                    st.markdown("### 🛡️ Ordens de Proteção na Corretora")
-                    st.info("Insira estes valores no seu Home Broker para proteger o capital.")
-                    col4, col5 = st.columns(2)
-                    col4.metric(f"Preço do Stop Loss (-{STOP_LOSS_PCT*100:.0f}%)", f"R$ {valor_stop_loss:.2f}")
-                    col5.metric(f"Alvo Base (Trailing +{TRAILING_STOP_PCT*100:.0f}%)", f"R$ {valor_alvo_trailing:.2f}")
-
-                st.caption(f"Dados atualizados com o último fecho do mercado. ({datetime.now().strftime('%d/%m %H:%M')})")
-
-        except Exception as e:
-            st.error(f"Ocorreu um erro inesperado no cálculo. Detalhes: {e}")
+        # Gestão de Risco
+        if recomendacao != "FORA":
+            st.markdown("### 🛡️ Gestão de Risco Estrita")
+            v_stop = preco * (1 - STOP_LOSS_PCT)
+            v_alvo = preco * (1 + TRAILING_STOP_PCT)
+            col4, col5 = st.columns(2)
+            col4.metric(f"Stop Loss (-{STOP_LOSS_PCT*100:.0f}%)", f"R$ {v_stop:.2f}")
+            col5.metric(f"Ativar Trailing (+{TRAILING_STOP_PCT*100:.0f}%)", f"R$ {v_alvo:.2f}")
+    else:
+        st.error("Não foi possível carregar os dados. Verifique se o ticker (ex: VALE3.SA) está correto.")
 else:
-    st.write("👈 Insira o código da ação no menu lateral, ajuste os parâmetros do gabarito e clique em **Analisar Ação**.")
+    st.write("👈 Configure os parâmetros e clique em **Analisar Ação**.")
