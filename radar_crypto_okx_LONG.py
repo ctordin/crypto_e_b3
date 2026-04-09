@@ -25,7 +25,8 @@ PORTFOLIO = {
     'DOGE/USDT': 'DOGE-USD',
     'DOT/USDT': 'DOT-USD',
     'XRP/USDT': 'XRP-USD',
-    'POL/USDT': 'POL-USD'
+    'POL/USDT': 'POL-USD',
+    'ENJ/USDT': 'ENJ-USD'
 }
 
 # ==========================================
