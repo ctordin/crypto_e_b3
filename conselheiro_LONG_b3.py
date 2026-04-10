@@ -14,13 +14,23 @@ def buscar_fundamentos(ticker):
     try:
         acao = yf.Ticker(ticker)
         inf = acao.info
-        if not inf or len(inf) < 10: return None
+        
+        # Se o dicionário vier quase vazio, retornamos None para o bot saber que falhou
+        if not inf or len(inf) < 5: 
+            return None
+        
+        # Tenta pegar o P/L de três formas diferentes antes de desistir
+        pl_valor = inf.get('forwardPE') or inf.get('trailingPE') or inf.get('priceToEarnings') or 0
+        dy_valor = (inf.get('dividendYield') or 0) * 100
+        margem_valor = (inf.get('profitMargins') or 0) * 100
+        
         return {
-            "pl": inf.get('forwardPE') or inf.get('trailingPE') or 0,
-            "dy": (inf.get('dividendYield') or 0) * 100,
-            "margem": (inf.get('profitMargins') or 0) * 100
+            "pl": pl_valor,
+            "dy": dy_valor,
+            "margem": margem_valor
         }
-    except: return None
+    except:
+        return None
 
 @st.cache_data(ttl=300)
 def buscar_grafico(ticker):
