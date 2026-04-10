@@ -16,7 +16,7 @@ st.markdown("---")
 
 LISTA_ACOES = [
     'PETR4.SA', 'VALE3.SA', 'ITUB4.SA', 'MBRF3.SA', 'TOTS3.SA',
-    'WEGE3.SA', 'ABEV3.SA', 'RENT3.SA', 'SUZB3.SA', 'NATU3.SA', 'ALOS3.SA',
+    'SMTO3.SA', 'ABEV3.SA', 'RENT3.SA', 'SUZB3.SA', 'NATU3.SA', 'ALOS3.SA',
     'MGLU3.SA'
 ]
 
