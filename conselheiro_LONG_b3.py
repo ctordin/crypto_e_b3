@@ -32,20 +32,19 @@ def buscar_fundamentos(ticker):
 @st.cache_data(ttl=300)
 def buscar_grafico(ticker):
     try:
-        # Aumentado para 250d para garantir dados de 180 dias úteis
-        df = yf.download(ticker, period='250d', interval='1d', progress=False)
+        # Aumentado para 250d para garantir dados de 180 dias úteis de pregão
+        df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
         if df is None or df.empty: return None
         
-        # Ajuste para MultiIndex (evitar erro de Series/Float)
+        # Ajuste para MultiIndex (evita erro de Series/Float)
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
             
         df = df.reset_index()
-        col_f = 'Adj Close' if 'Adj Close' in df.columns else 'Close'
+        col_f = 'Close'
         df.rename(columns={col_f: 'fechamento', 'Date': 'data', 'High': 'maxima'}, inplace=True)
         
         # Indicadores Técnicos
-        df['ema_9'] = df['fechamento'].ewm(span=9, adjust=False).mean()
         df['sma_50'] = df['fechamento'].rolling(window=50).mean()
         
         delta = df['fechamento'].diff()
@@ -60,7 +59,7 @@ def buscar_grafico(ticker):
 with st.sidebar:
     st.header("⚙️ Parâmetros")
     with st.form("form_gestor"):
-        SIMBOLO = st.text_input("Ação (ex: ALOS3.SA)", value="ALOS3.SA").upper().strip()
+        SIMBOLO = st.text_input("Ação (ex: VALE3.SA)", value="ALOS3.SA").upper().strip()
         
         st.markdown("---")
         POSSUO_ACAO = st.checkbox("Já possuo esta ação?")
@@ -78,7 +77,7 @@ st.title("🏢 Conselheiro B3: Gestor de Posição")
 st.markdown("---")
 
 if btn_analisar:
-    with st.spinner("Sincronizando dados e cálculos de risco..."):
+    with st.spinner("Sincronizando dados e cálculos..."):
         fund = buscar_fundamentos(SIMBOLO)
         df = buscar_grafico(SIMBOLO)
         
@@ -88,11 +87,11 @@ if btn_analisar:
             rsi = float(atual['rsi'])
             tend_alta = preco_atual > float(atual['sma_50'])
 
-            # --- NOVO: CÁLCULO DE MÁXIMAS 90 E 180 DIAS ---
+            # CÁLCULO DE MÁXIMAS
             max_180d = float(df['maxima'].tail(180).max())
             max_90d = float(df['maxima'].tail(90).max())
 
-            # BLOCO A: GESTÃO DA SUA CARTEIRA
+            # BLOCO A: GESTÃO DA CARTEIRA
             if POSSUO_ACAO and PRECO_COMPRA > 0:
                 lucro_reais = preco_atual - PRECO_COMPRA
                 lucro_pct = (lucro_reais / PRECO_COMPRA) * 100
@@ -100,4 +99,51 @@ if btn_analisar:
                 st.subheader("💰 Minha Posição")
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Preço Médio", f"R$ {PRECO_COMPRA:.2f}")
-                m2.metric("Lucro/Pre
+                m2.metric("Lucro/Prejuízo", f"R$ {lucro_reais:.2f}", f"{lucro_pct:.2f}%")
+                
+                if ALVO_ANALISTA > 0:
+                    distancia_alvo = ((ALVO_ANALISTA / preco_atual) - 1) * 100
+                    m3.metric("Distância Alvo", f"{distancia_alvo:.1f}%")
+                st.divider()
+
+            # BLOCO B: FUNDAMENTOS
+            if fund:
+                st.subheader("📊 Saúde da Empresa")
+                f1, f2, f3 = st.columns(3)
+                f1.metric("P/L", f"{fund['pl']:.1f}")
+                f2.metric("Div. Yield", f"{fund['dy']:.1f}%")
+                f3.metric("Margem Líquida", f"{fund['margem']:.1f}%")
+                st.divider()
+
+            # BLOCO: RADIOGRAFIA DE TETO
+            st.subheader("📉 Resistências e Tetos Recentes")
+            c1, c2 = st.columns(2)
+            c1.info(f"**Máxima 90 dias:** R$ {max_90d:.2f}")
+            c2.info(f"**Máxima 180 dias:** R$ {max_180d:.2f}")
+            
+            dist_topo = ((max_180d - preco_atual) / max_180d) * 100
+            st.write(f"O papel está operando **{dist_topo:.1f}%** abaixo do topo de 180 dias.")
+            st.divider()
+
+            # BLOCO C: MOMENTO TÉCNICO
+            st.subheader("📈 Análise de Momento")
+            if rsi > 65:
+                st.warning(f"⚠️ ATENÇÃO: Ativo esticado (RSI {rsi:.1f}).")
+            elif tend_alta and rsi < RSI_MAX:
+                st.success("🟢 PONTO DE ENTRADA: Ativo em tendência e com desconto.")
+            else:
+                st.error("🔴 FORA DO SETUP: Risco alto ou tendência de baixa.")
+
+            # BLOCO D: GESTÃO DE RISCO
+            st.subheader("🛡️ Gestão de Risco")
+            v_stop = preco_atual * (1 - STOP_LOSS_PCT)
+            target = ALVO_ANALISTA if ALVO_ANALISTA > 0 else (preco_atual * 1.10)
+            
+            r1, r2 = st.columns(2)
+            r1.error(f"Stop Loss: R$ {v_stop:.2f}")
+            r2.success(f"Alvo Sugerido: R$ {target:.2f}")
+
+        else:
+            st.error("Erro ao carregar dados. Verifique o ticker (ex: VALE3.SA).")
+else:
+    st.info("Aguardando análise...")
