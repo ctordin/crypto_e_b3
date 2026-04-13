@@ -1,112 +1,149 @@
 import streamlit as st
-import pandas as pd
-import requests
 import yfinance as yf
+import pandas as pd
+from datetime import datetime
+import warnings
+warnings.filterwarnings('ignore')
 
-# 1. Configuração da página
-st.set_page_config(page_title="Conselheiro Híbrido Pro", layout="wide")
+# 1. Configuração da Página
+st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout="centered")
 
-def buscar_dados_okx(ticker_raw):
+# 2. Funções de Busca
+@st.cache_data(ttl=3600)
+def buscar_fundamentos(ticker):
     try:
-        # Limpeza robusta do ticker
-        simbolo = ticker_raw.upper().replace("-USD", "").replace("-USDT", "").replace(".SA", "").strip()
-        instId = f"{simbolo}-USDT"
+        acao = yf.Ticker(ticker)
+        inf = acao.info
+        if not inf or len(inf) < 5: 
+            return None
         
-        # Chamada para a API da OKX com cabeçalho de usuário para evitar bloqueios
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        url_t = f"https://www.okx.com/api/v5/market/ticker?instId={instId}"
-        res_t = requests.get(url_t, headers=headers, timeout=10).json()
-
-        if res_t.get('code') == '0' and len(res_t.get('data', [])) > 0:
-            t_data = res_t['data'][0]
-            
-            # Busca histórico para máxima de 180 dias
-            url_c = f"https://www.okx.com/api/v5/market/candles?instId={instId}&bar=1D&limit=180"
-            res_c = requests.get(url_c, headers=headers, timeout=10).json()
-            
-            preco_atual = float(t_data['last'])
-            max_180 = preco_atual
-            
-            if res_c.get('code') == '0' and len(res_c.get('data', [])) > 0:
-                df_c = pd.DataFrame(res_c['data'], columns=['ts', 'o', 'h', 'l', 'c', 'vol', 'volCcy', 'confirm'])
-                max_180 = pd.to_numeric(df_c['h']).max()
-                
-            return {"preco": preco_atual, "max_180": max_180, "fonte": "OKX Direct"}
+        pl_valor = inf.get('forwardPE') or inf.get('trailingPE') or inf.get('priceToEarnings') or 0
+        dy_valor = (inf.get('dividendYield') or 0) * 100
+        margem_valor = (inf.get('profitMargins') or 0) * 100
+        
+        return {
+            "pl": pl_valor,
+            "dy": dy_valor,
+            "margem": margem_valor
+        }
     except:
         return None
-    return None
 
-# --- Interface Lateral ---
-st.sidebar.header("⚙️ Parâmetros")
-ticker_input = st.sidebar.text_input("Ativo (Ex: OFC, AVAX, VALE3.SA)", "AVAX").strip()
+@st.cache_data(ttl=300)
+def buscar_grafico(ticker):
+    try:
+        # Aumentado para 250d para garantir dados de 180 dias úteis de pregão
+        df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
+        if df is None or df.empty: return None
+        
+        # Ajuste para MultiIndex (evita erro de Series/Float)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            
+        df = df.reset_index()
+        col_f = 'Close'
+        df.rename(columns={col_f: 'fechamento', 'Date': 'data', 'High': 'maxima'}, inplace=True)
+        
+        # Indicadores Técnicos
+        df['sma_50'] = df['fechamento'].rolling(window=50).mean()
+        
+        delta = df['fechamento'].diff()
+        ganho = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        perda = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        df['rsi'] = 100 - (100 / (1 + (ganho/perda.replace(0, 0.001))))
+        
+        return df.dropna()
+    except: return None
 
-st.sidebar.divider()
-ja_possui = st.sidebar.checkbox("Já possuo este ativo?")
-preco_compra = st.sidebar.number_input("Preço de Compra ($)", format="%.4f", value=0.0)
-stop_loss_pct = st.sidebar.number_input("Stop Loss Máximo (%)", value=4.0)
+# 3. Interface Lateral
+with st.sidebar:
+    st.header("⚙️ Parâmetros")
+    with st.form("form_gestor"):
+        SIMBOLO = st.text_input("Ação (ex: VALE3.SA)", value="ALOS3.SA").upper().strip()
+        
+        st.markdown("---")
+        POSSUO_ACAO = st.checkbox("Já possuo esta ação?")
+        PRECO_COMPRA = st.number_input("Meu Preço de Compra (R$)", value=0.0, step=0.01)
+        ALVO_ANALISTA = st.number_input("Alvo do Analista (R$)", value=0.0, step=0.01)
+        
+        st.markdown("---")
+        STOP_LOSS_PCT = st.number_input("Stop Loss desejado (%)", value=5.0) / 100.0
+        RSI_MAX = st.number_input("RSI Máx. (Promoção)", value=55)
+        
+        btn_analisar = st.form_submit_button("🚀 ANALISAR E GERENCIAR", use_container_width=True)
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("🆘 Entrada Manual (Opcional)")
-preco_manual = st.sidebar.number_input("Preço Manual (se erro API)", format="%.4f", value=0.0)
-
-btn_analisar = st.sidebar.button("🚀 ATUALIZAR CONSELHEIRO")
-
-# --- Painel Principal ---
-st.title("🚀 Conselheiro Crypto: Gestor de Risco")
-st.divider()
+# 4. Painel Principal
+st.title("🏢 Conselheiro B3: Gestor de Posição")
+st.markdown("---")
 
 if btn_analisar:
-    dados = None
-    
-    with st.spinner('Sincronizando com o mercado...'):
-        # 1. Tenta OKX
-        dados = buscar_dados_okx(ticker_input)
+    with st.spinner("Sincronizando dados e cálculos..."):
+        fund = buscar_fundamentos(SIMBOLO)
+        df = buscar_grafico(SIMBOLO)
         
-        # 2. Se falhar, tenta Yahoo Finance
-        if not dados:
-            try:
-                # Ajusta ticker para o Yahoo
-                if ".SA" in ticker_input.upper():
-                    yf_tk = ticker_input.upper()
-                else:
-                    yf_tk = f"{ticker_input.upper().replace('-USD', '')}-USD"
+        if df is not None:
+            atual = df.iloc[-1]
+            preco_atual = float(atual['fechamento'])
+            rsi = float(atual['rsi'])
+            tend_alta = preco_atual > float(atual['sma_50'])
+
+            # CÁLCULO DE MÁXIMAS
+            max_180d = float(df['maxima'].tail(180).max())
+            max_90d = float(df['maxima'].tail(90).max())
+
+            # BLOCO A: GESTÃO DA CARTEIRA
+            if POSSUO_ACAO and PRECO_COMPRA > 0:
+                lucro_reais = preco_atual - PRECO_COMPRA
+                lucro_pct = (lucro_reais / PRECO_COMPRA) * 100
                 
-                yf_df = yf.download(yf_tk, period='180d', progress=False, auto_adjust=True)
-                if not yf_df.empty:
-                    if isinstance(yf_df.columns, pd.MultiIndex):
-                        yf_df.columns = yf_df.columns.get_level_values(0)
-                    
-                    dados = {
-                        "preco": float(yf_df['Close'].iloc[-1]),
-                        "max_180": float(yf_df['High'].max()),
-                        "fonte": "Yahoo Finance"
-                    }
-            except:
-                pass
+                st.subheader("💰 Minha Posição")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Preço Médio", f"R$ {PRECO_COMPRA:.2f}")
+                m2.metric("Lucro/Prejuízo", f"R$ {lucro_reais:.2f}", f"{lucro_pct:.2f}%")
+                
+                if ALVO_ANALISTA > 0:
+                    distancia_alvo = ((ALVO_ANALISTA / preco_atual) - 1) * 100
+                    m3.metric("Distância Alvo", f"{distancia_alvo:.1f}%")
+                st.divider()
 
-    # 3. Se tudo falhar, usa entrada manual
-    if not dados and preco_manual > 0:
-        dados = {"preco": preco_manual, "max_180": preco_manual * 1.05, "fonte": "Entrada Manual"}
+            # BLOCO B: FUNDAMENTOS
+            if fund:
+                st.subheader("📊 Saúde da Empresa")
+                f1, f2, f3 = st.columns(3)
+                f1.metric("P/L", f"{fund['pl']:.1f}")
+                f2.metric("Div. Yield", f"{fund['dy']:.1f}%")
+                f3.metric("Margem Líquida", f"{fund['margem']:.1f}%")
+                st.divider()
 
-    if dados:
-        col1, col2 = st.columns(2)
-        col1.metric("Preço Atual", f"$ {dados['preco']:.4f}")
-        col2.metric("Fonte", dados['fonte'])
-
-        if ja_possui and preco_compra > 0:
-            st.subheader("💼 Minha Posição")
-            lucro = ((dados['preco'] - preco_compra) / preco_compra) * 100
-            st.metric("Resultado Atual", f"{lucro:.2f}%", delta=f"{lucro:.2f}%")
+            # BLOCO: RADIOGRAFIA DE TETO
+            st.subheader("📉 Resistências e Tetos Recentes")
+            c1, c2 = st.columns(2)
+            c1.info(f"**Máxima 90 dias:** R$ {max_90d:.2f}")
+            c2.info(f"**Máxima 180 dias:** R$ {max_180d:.2f}")
+            
+            dist_topo = ((max_180d - preco_atual) / max_180d) * 100
+            st.write(f"O papel está operando **{dist_topo:.1f}%** abaixo do topo de 180 dias.")
             st.divider()
 
-        st.subheader("🛡️ Gestão de Saída")
-        v_stop = dados['preco'] * (1 - (stop_loss_pct / 100))
-        v_alvo = dados['preco'] * 1.20
-        
-        s1, s2 = st.columns(2)
-        s1.error(f"STOP LOSS: $ {v_stop:.4f}")
-        s2.success(f"ALVO (+20%): $ {v_alvo:.4f}")
-        
-        st.info(f"Resistência (Máxima 180d): $ {dados['max_180']:.4f}")
-    else:
-        st.error("Erro de conexão. Por favor, insira o preço no campo 'Preço Manual' na lateral.")
+            # BLOCO C: MOMENTO TÉCNICO
+            st.subheader("📈 Análise de Momento")
+            if rsi > 65:
+                st.warning(f"⚠️ ATENÇÃO: Ativo esticado (RSI {rsi:.1f}).")
+            elif tend_alta and rsi < RSI_MAX:
+                st.success("🟢 PONTO DE ENTRADA: Ativo em tendência e com desconto.")
+            else:
+                st.error("🔴 FORA DO SETUP: Risco alto ou tendência de baixa.")
+
+            # BLOCO D: GESTÃO DE RISCO
+            st.subheader("🛡️ Gestão de Risco")
+            v_stop = preco_atual * (1 - STOP_LOSS_PCT)
+            target = ALVO_ANALISTA if ALVO_ANALISTA > 0 else (preco_atual * 1.10)
+            
+            r1, r2 = st.columns(2)
+            r1.error(f"Stop Loss: R$ {v_stop:.2f}")
+            r2.success(f"Alvo Sugerido: R$ {target:.2f}")
+
+        else:
+            st.error("Erro ao carregar dados. Verifique o ticker (ex: VALE3.SA).")
+else:
+    st.info("Aguardando análise...")
