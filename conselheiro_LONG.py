@@ -1,149 +1,117 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from datetime import datetime
-import warnings
-warnings.filterwarnings('ignore')
 
-# 1. Configuração da Página
-st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout="centered")
+# Configuração da página
+st.set_page_config(page_title="Conselheiro Crypto", layout="wide")
 
-# 2. Funções de Busca
-@st.cache_data(ttl=3600)
-def buscar_fundamentos(ticker):
+def buscar_dados_crypto(ticker, dias=180):
     try:
-        acao = yf.Ticker(ticker)
-        inf = acao.info
-        if not inf or len(inf) < 5: 
+        data = yf.download(ticker, period=f"{dias}d", interval="1d", progress=False, auto_adjust=True)
+        if data.empty:
             return None
-        
-        pl_valor = inf.get('forwardPE') or inf.get('trailingPE') or inf.get('priceToEarnings') or 0
-        dy_valor = (inf.get('dividendYield') or 0) * 100
-        margem_valor = (inf.get('profitMargins') or 0) * 100
-        
-        return {
-            "pl": pl_valor,
-            "dy": dy_valor,
-            "margem": margem_valor
-        }
-    except:
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+        return data
+    except Exception:
         return None
 
-@st.cache_data(ttl=300)
-def buscar_grafico(ticker):
-    try:
-        # Aumentado para 250d para garantir dados de 180 dias úteis de pregão
-        df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
-        if df is None or df.empty: return None
-        
-        # Ajuste para MultiIndex (evita erro de Series/Float)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
+def calcular_rsi(data, window=14):
+    close = data['Close'].iloc[:, 0] if len(data['Close'].shape) > 1 else data['Close']
+    delta = close.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss.replace(0, 0.001)
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.iloc[-1]
+
+# --- Interface Lateral (RESTAURADA) ---
+st.sidebar.header("⚙️ Configurações de Análise")
+ticker_input = st.sidebar.text_input("Par (ex: AVAX-USD)", "AVAX-USD")
+
+st.sidebar.divider()
+ja_possui = st.sidebar.checkbox("Já possuo esta moeda?", value=False)
+preco_analista = st.sidebar.number_input("Preço de Compra / Analista ($)", format="%.4f", value=0.0)
+stop_loss_max = st.sidebar.number_input("Stop Loss Máximo (%)", value=4.0)
+
+btn_confirmar = st.sidebar.button("🚀 ATUALIZAR CONSELHEIRO")
+
+# --- Lógica Principal ---
+st.title("🚀 Conselheiro Crypto: Gestor de Risco")
+st.divider()
+
+if btn_confirmar:
+    with st.spinner('Acessando dados em tempo real...'):
+        df = buscar_dados_crypto(ticker_input)
+    
+    if df is not None:
+        try:
+            def extrair_valor(coluna, index=-1):
+                val = df[coluna].iloc[index]
+                if isinstance(val, (pd.Series, pd.DataFrame)):
+                    return float(val.iloc[0])
+                return float(val)
+
+            preco_atual = extrair_valor('Close')
+            volume_atual = extrair_valor('Volume')
+            volume_medio = float(df['Volume'].mean())
+            rsi_valor = float(calcular_rsi(df))
             
-        df = df.reset_index()
-        col_f = 'Close'
-        df.rename(columns={col_f: 'fechamento', 'Date': 'data', 'High': 'maxima'}, inplace=True)
-        
-        # Indicadores Técnicos
-        df['sma_50'] = df['fechamento'].rolling(window=50).mean()
-        
-        delta = df['fechamento'].diff()
-        ganho = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        perda = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        df['rsi'] = 100 - (100 / (1 + (ganho/perda.replace(0, 0.001))))
-        
-        return df.dropna()
-    except: return None
+            # Máximas 90 e 180 dias
+            max_180d = float(df['High'].max())
+            df_90 = df.iloc[-90:] if len(df) >= 90 else df
+            max_90d = float(df_90['High'].max())
+            
+            # Dashboard Superior
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Preço Atual", f"$ {preco_atual:.4f}")
+            with col2:
+                st.metric("RSI (14d)", f"{rsi_valor:.1f}")
+            with col3:
+                vol_label = "Baixo" if volume_atual < volume_medio else "Alto"
+                st.metric("Volume", vol_label)
 
-# 3. Interface Lateral
-with st.sidebar:
-    st.header("⚙️ Parâmetros")
-    with st.form("form_gestor"):
-        SIMBOLO = st.text_input("Ação (ex: VALE3.SA)", value="ALOS3.SA").upper().strip()
-        
-        st.markdown("---")
-        POSSUO_ACAO = st.checkbox("Já possuo esta ação?")
-        PRECO_COMPRA = st.number_input("Meu Preço de Compra (R$)", value=0.0, step=0.01)
-        ALVO_ANALISTA = st.number_input("Alvo do Analista (R$)", value=0.0, step=0.01)
-        
-        st.markdown("---")
-        STOP_LOSS_PCT = st.number_input("Stop Loss desejado (%)", value=5.0) / 100.0
-        RSI_MAX = st.number_input("RSI Máx. (Promoção)", value=55)
-        
-        btn_analisar = st.form_submit_button("🚀 ANALISAR E GERENCIAR", use_container_width=True)
-
-# 4. Painel Principal
-st.title("🏢 Conselheiro B3: Gestor de Posição")
-st.markdown("---")
-
-if btn_analisar:
-    with st.spinner("Sincronizando dados e cálculos..."):
-        fund = buscar_fundamentos(SIMBOLO)
-        df = buscar_grafico(SIMBOLO)
-        
-        if df is not None:
-            atual = df.iloc[-1]
-            preco_atual = float(atual['fechamento'])
-            rsi = float(atual['rsi'])
-            tend_alta = preco_atual > float(atual['sma_50'])
-
-            # CÁLCULO DE MÁXIMAS
-            max_180d = float(df['maxima'].tail(180).max())
-            max_90d = float(df['maxima'].tail(90).max())
-
-            # BLOCO A: GESTÃO DA CARTEIRA
-            if POSSUO_ACAO and PRECO_COMPRA > 0:
-                lucro_reais = preco_atual - PRECO_COMPRA
-                lucro_pct = (lucro_reais / PRECO_COMPRA) * 100
+            # --- Seção de Posse e Performance ---
+            if ja_possui and preco_analista > 0:
+                st.subheader("💼 Minha Posição")
+                lucro_prejuizo = ((preco_atual - preco_analista) / preco_analista) * 100
+                cor_delta = "normal" if lucro_prejuizo >= 0 else "inverse"
                 
-                st.subheader("💰 Minha Posição")
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Preço Médio", f"R$ {PRECO_COMPRA:.2f}")
-                m2.metric("Lucro/Prejuízo", f"R$ {lucro_reais:.2f}", f"{lucro_pct:.2f}%")
-                
-                if ALVO_ANALISTA > 0:
-                    distancia_alvo = ((ALVO_ANALISTA / preco_atual) - 1) * 100
-                    m3.metric("Distância Alvo", f"{distancia_alvo:.1f}%")
+                c_pos1, c_pos2 = st.columns(2)
+                c_pos1.metric("Preço de Entrada", f"$ {preco_analista:.4f}")
+                c_pos2.metric("Resultado Atual", f"{lucro_prejuizo:.2f}%", delta=f"{lucro_prejuizo:.2f}%", delta_color=cor_delta)
                 st.divider()
 
-            # BLOCO B: FUNDAMENTOS
-            if fund:
-                st.subheader("📊 Saúde da Empresa")
-                f1, f2, f3 = st.columns(3)
-                f1.metric("P/L", f"{fund['pl']:.1f}")
-                f2.metric("Div. Yield", f"{fund['dy']:.1f}%")
-                f3.metric("Margem Líquida", f"{fund['margem']:.1f}%")
-                st.divider()
-
-            # BLOCO: RADIOGRAFIA DE TETO
-            st.subheader("📉 Resistências e Tetos Recentes")
+            # --- Radiografia do Mercado ---
+            st.subheader("📊 Radiografia do Mercado")
             c1, c2 = st.columns(2)
-            c1.info(f"**Máxima 90 dias:** R$ {max_90d:.2f}")
-            c2.info(f"**Máxima 180 dias:** R$ {max_180d:.2f}")
-            
-            dist_topo = ((max_180d - preco_atual) / max_180d) * 100
-            st.write(f"O papel está operando **{dist_topo:.1f}%** abaixo do topo de 180 dias.")
-            st.divider()
+            c1.info(f"**Máxima 90 dias:** $ {max_90d:.4f}")
+            c2.info(f"**Máxima 180 dias:** $ {max_180d:.4f}")
 
-            # BLOCO C: MOMENTO TÉCNICO
-            st.subheader("📈 Análise de Momento")
-            if rsi > 65:
-                st.warning(f"⚠️ ATENÇÃO: Ativo esticado (RSI {rsi:.1f}).")
-            elif tend_alta and rsi < RSI_MAX:
-                st.success("🟢 PONTO DE ENTRADA: Ativo em tendência e com desconto.")
+            if rsi_valor < 35:
+                st.success("🟢 OPORTUNIDADE: Ativo sobrevendido (RSI Baixo).")
+            elif rsi_valor > 65:
+                st.warning("🔴 ALERTA: Ativo sobrecomprado (RSI Alto).")
             else:
-                st.error("🔴 FORA DO SETUP: Risco alto ou tendência de baixa.")
+                st.info("🟡 NEUTRO: Aguarde definição de volume ou RSI.")
 
-            # BLOCO D: GESTÃO DE RISCO
-            st.subheader("🛡️ Gestão de Risco")
-            v_stop = preco_atual * (1 - STOP_LOSS_PCT)
-            target = ALVO_ANALISTA if ALVO_ANALISTA > 0 else (preco_atual * 1.10)
+            # --- Gestão de Saída ---
+            st.subheader("🛡️ Gestão de Saída / Stop Loss")
+            valor_stop = preco_atual * (1 - (stop_loss_max / 100))
+            alvo_sugerido = preco_atual * 1.20
+
+            col_s1, col_s2 = st.columns(2)
+            col_s1.error(f"Stop Loss Sugerido: $ {valor_stop:.4f}")
+            col_s2.success(f"Alvo Sugerido (+20%): $ {alvo_sugerido:.4f}")
             
-            r1, r2 = st.columns(2)
-            r1.error(f"Stop Loss: R$ {v_stop:.2f}")
-            r2.success(f"Alvo Sugerido: R$ {target:.2f}")
+            distancia_topo = ((max_180d - preco_atual) / max_180d) * 100
+            st.write(f"---")
+            st.write(f"**Análise de Ciclo:** O preço atual está a **{distancia_topo:.1f}%** abaixo da máxima de 180 dias.")
 
-        else:
-            st.error("Erro ao carregar dados. Verifique o ticker (ex: VALE3.SA).")
+        except Exception as e:
+            st.error(f"Erro ao processar valores: {e}")
+    else:
+        st.error("Erro: Ticker inválido. Use o formato 'AVAX-USD' ou 'PETR4.SA'.")
 else:
-    st.info("Aguardando análise...")
+    st.info("Informe os dados na barra lateral e clique em 'Atualizar Conselheiro'.")
