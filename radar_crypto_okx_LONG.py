@@ -27,7 +27,8 @@ PORTFOLIO = {
     'XRP/USDT': 'XRP-USD',
     'POL/USDT': 'POL-USD',
     'ENJ/USDT': 'ENJ-USD',
-    'XAUT/USDT': 'XAUT-USD'
+    'XAUT/USDT': 'XAUT-USD',
+    'TSMUSDT': 'TSM-USD'
 }
 
 # ==========================================
