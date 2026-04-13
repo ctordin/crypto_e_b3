@@ -25,7 +25,7 @@ def calcular_rsi(data, window=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi.iloc[-1]
 
-# --- Interface Lateral (RESTAURADA) ---
+# --- Interface Lateral ---
 st.sidebar.header("⚙️ Configurações de Análise")
 ticker_input = st.sidebar.text_input("Par (ex: AVAX-USD)", "AVAX-USD")
 
@@ -76,15 +76,42 @@ if btn_confirmar:
             if ja_possui and preco_analista > 0:
                 st.subheader("💼 Minha Posição")
                 lucro_prejuizo = ((preco_atual - preco_analista) / preco_analista) * 100
-                cor_delta = "normal" if lucro_prejuizo >= 0 else "inverse"
                 
                 c_pos1, c_pos2 = st.columns(2)
                 c_pos1.metric("Preço de Entrada", f"$ {preco_analista:.4f}")
-                c_pos2.metric("Resultado Atual", f"{lucro_prejuizo:.2f}%", delta=f"{lucro_prejuizo:.2f}%", delta_color=cor_delta)
+                c_pos2.metric("Resultado Atual", f"{lucro_prejuizo:.2f}%", delta=f"{lucro_prejuizo:.2f}%")
                 st.divider()
 
             # --- Radiografia do Mercado ---
             st.subheader("📊 Radiografia do Mercado")
             c1, c2 = st.columns(2)
+            # Linhas corrigidas abaixo:
             c1.info(f"**Máxima 90 dias:** $ {max_90d:.4f}")
-            c2.info(f"**Máxima 180 dias
+            c2.info(f"**Máxima 180 dias:** $ {max_180d:.4f}")
+
+            if rsi_valor < 35:
+                st.success("🟢 OPORTUNIDADE: Ativo sobrevendido (RSI Baixo).")
+            elif rsi_valor > 65:
+                st.warning("🔴 ALERTA: Ativo sobrecomprado (RSI Alto).")
+            else:
+                st.info("🟡 NEUTRO: Aguarde definição de volume ou RSI.")
+
+            # --- Gestão de Saída ---
+            st.subheader("🛡️ Gestão de Saída / Stop Loss")
+            valor_stop = preco_atual * (1 - (stop_loss_max / 100))
+            alvo_sugerido = preco_atual * 1.20
+
+            col_s1, col_s2 = st.columns(2)
+            col_s1.error(f"Stop Loss Sugerido: $ {valor_stop:.4f}")
+            col_s2.success(f"Alvo Sugerido (+20%): $ {alvo_sugerido:.4f}")
+            
+            distancia_topo = ((max_180d - preco_atual) / max_180d) * 100
+            st.divider()
+            st.write(f"**Análise de Ciclo:** O preço atual está a **{distancia_topo:.1f}%** abaixo da máxima de 180 dias.")
+
+        except Exception as e:
+            st.error(f"Erro ao processar valores: {e}")
+    else:
+        st.error("Erro: Ticker inválido ou sem dados.")
+else:
+    st.info("Informe os dados na barra lateral e clique em 'Atualizar Conselheiro'.")
