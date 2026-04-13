@@ -6,50 +6,52 @@ import yfinance as yf
 # 1. Configuração da página
 st.set_page_config(page_title="Conselheiro Híbrido OKX/B3", layout="wide")
 
-def buscar_dados_okx(ticker):
-    """Busca dados na API pública da OKX com tratamento de nome"""
-    try:
-        # TRATAMENTO DO NOME: Remove -USD ou -USDT e remonta para o padrão OKX
-        simbolo = ticker.upper().replace("-USD", "").replace("-USDT", "").strip()
-        instId = f"{simbolo}-USDT"
+def buscar_dados_okx(ticker_raw):
+    """Busca dados na OKX tentando múltiplas combinações de pares"""
+    # Limpa o ticker
+    simbolo = ticker_raw.upper().replace("-USD", "").replace("-USDT", "").replace("/", "").strip()
+    
+    # Lista de tentativas de pares comuns na OKX
+    tentativas = [f"{simbolo}-USDT", f"{simbolo}-USDC", f"{simbolo}-BTC"]
+    
+    for instId in tentativas:
+        try:
+            url_t = f"https://www.okx.com/api/v5/market/ticker?instId={instId}"
+            res_t = requests.get(url_t, timeout=10).json()
 
-        # URLs da OKX
-        url_t = f"https://www.okx.com/api/v5/market/ticker?instId={instId}"
-        url_c = f"https://www.okx.com/api/v5/market/candles?instId={instId}&bar=1D&limit=180"
-        
-        res_t = requests.get(url_t).json()
-        res_c = requests.get(url_c).json()
-
-        if res_t['code'] == '0' and len(res_t['data']) > 0:
-            t_data = res_t['data'][0]
-            
-            # Processa Candles para Máximas e RSI
-            if res_c['code'] == '0' and len(res_c['data']) > 0:
-                df = pd.DataFrame(res_c['data'], columns=['ts', 'o', 'h', 'l', 'c', 'vol', 'volCcy', 'confirm'])
-                df[['h', 'l', 'c', 'vol']] = df[['h', 'l', 'c', 'vol']].apply(pd.to_numeric)
+            if res_t.get('code') == '0' and len(res_t.get('data', [])) > 0:
+                t_data = res_t['data'][0]
                 
-                # RSI (Calculado sobre os candles da OKX)
-                delta = df['c'].diff(-1)
-                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                rs = gain / loss.replace(0, 0.001)
-                rsi_valor = 100 - (100 / (1 + rs.iloc[0]))
+                # Se achou o ticker, busca os candles para máximas e RSI
+                url_c = f"https://www.okx.com/api/v5/market/candles?instId={instId}&bar=1D&limit=180"
+                res_c = requests.get(url_c, timeout=10).json()
+                
+                if res_c.get('code') == '0' and len(res_c.get('data', [])) > 0:
+                    df = pd.DataFrame(res_c['data'], columns=['ts', 'o', 'h', 'l', 'c', 'vol', 'volCcy', 'confirm'])
+                    df[['h', 'l', 'c', 'vol']] = df[['h', 'l', 'c', 'vol']].apply(pd.to_numeric)
+                    
+                    # RSI (Calculado sobre os candles da OKX)
+                    delta = df['c'].diff(-1)
+                    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                    rs = gain / loss.replace(0, 0.001)
+                    rsi_valor = 100 - (100 / (1 + rs.iloc[0]))
 
-                return {
-                    "preco": float(t_data['last']),
-                    "vol_24h": float(t_data['vol24h']),
-                    "max_180d": df['h'].max(),
-                    "max_90d": df['h'].head(90).max(),
-                    "rsi": rsi_valor,
-                    "fonte": "OKX Direct"
-                }
-    except Exception as e:
-        return None
+                    return {
+                        "preco": float(t_data['last']),
+                        "vol_24h": float(t_data['vol24h']),
+                        "max_180d": df['h'].max(),
+                        "max_90d": df['h'].head(90).max(),
+                        "rsi": rsi_valor,
+                        "par_encontrado": instId,
+                        "fonte": "OKX Direct"
+                    }
+        except Exception:
+            continue
     return None
 
-# --- Restante do código (Barra Lateral e Interface) ---
+# --- Barra Lateral ---
 st.sidebar.header("⚙️ Configurações de Análise")
-# Sugestão: deixe apenas 'OFC' para testar
 ticker_input = st.sidebar.text_input("Ativo (ex: OFC, AVAX ou VALE3.SA)", "OFC").strip()
 
 st.sidebar.divider()
@@ -63,21 +65,22 @@ st.title("🚀 Conselheiro Crypto: Gestor de Risco")
 st.divider()
 
 if btn_analisar:
-    dados = buscar_dados_okx(ticker_input)
+    with st.spinner(f'Consultando OKX para {ticker_input}...'):
+        dados = buscar_dados_okx(ticker_input)
     
-    # Se não achar na OKX e tiver .SA, tenta Yahoo
+    # Se não achar na OKX e for B3
     if not dados and ".SA" in ticker_input.upper():
-        # (Lógica do Yahoo Finance que já estava no código anterior)
         try:
             yf_df = yf.download(ticker_input, period='180d', progress=False, auto_adjust=True)
             if not yf_df.empty:
                 if isinstance(yf_df.columns, pd.MultiIndex): yf_df.columns = yf_df.columns.get_level_values(0)
+                preco_at = float(yf_df['Close'].iloc[-1])
                 dados = {
-                    "preco": float(yf_df['Close'].iloc[-1]),
-                    "vol_24h": float(yf_df['Volume'].iloc[-1]),
+                    "preco": preco_at,
                     "max_180d": float(yf_df['High'].max()),
                     "max_90d": float(yf_df['High'].tail(90).max()),
                     "rsi": 50.0,
+                    "par_encontrado": ticker_input.upper(),
                     "fonte": "B3 (Yahoo)"
                 }
         except: pass
@@ -86,7 +89,7 @@ if btn_analisar:
         col1, col2, col3 = st.columns(3)
         col1.metric("Preço Atual", f"$ {dados['preco']:.4f}")
         col2.metric("RSI (14d)", f"{dados['rsi']:.1f}")
-        col3.metric("Fonte", dados['fonte'])
+        col3.metric("Par / Fonte", f"{dados['par_encontrado']} ({dados['fonte']})")
 
         if ja_possui and preco_compra > 0:
             st.subheader("💼 Minha Posição")
@@ -100,6 +103,10 @@ if btn_analisar:
 
         st.subheader("🛡️ Gestão de Saída")
         v_stop = dados['preco'] * (1 - (stop_loss_pct / 100))
-        st.error(f"Stop Loss Sugerido: $ {v_stop:.4f}")
+        alvo = dados['preco'] * 1.20
+        
+        g1, g2 = st.columns(2)
+        g1.error(f"Stop Loss Sugerido: $ {v_stop:.4f}")
+        g2.success(f"Alvo Sugerido (+20%): $ {alvo:.4f}")
     else:
-        st.error("Ativo não encontrado. Tente apenas 'OFC' sem o '-USD'.")
+        st.error(f"Erro: O ativo '{ticker_input}' não retornou dados da OKX ou B3. Verifique se o ticker está correto na corretora.")
