@@ -7,52 +7,45 @@ st.set_page_config(page_title="Conselheiro Crypto", layout="wide")
 
 def buscar_dados_crypto(ticker, dias=180):
     try:
-        # Busca dados e força o arredondamento/ajuste automático
         data = yf.download(ticker, period=f"{dias}d", interval="1d", progress=False, auto_adjust=True)
-        
         if data.empty:
             return None
-        
-        # TRATAMENTO CRUCIAL: Se as colunas vierem duplicadas (MultiIndex), achata para nível único
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
-            
         return data
     except Exception:
         return None
 
 def calcular_rsi(data, window=14):
-    # Garante que Close seja uma série simples (1D)
     close = data['Close'].iloc[:, 0] if len(data['Close'].shape) > 1 else data['Close']
-    
     delta = close.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
-    
-    # Evita divisão por zero
     rs = gain / loss.replace(0, 0.001)
     rsi = 100 - (100 / (1 + rs))
     return rsi.iloc[-1]
 
-# --- Interface Lateral ---
-st.sidebar.header("⚙️ Portfólio Crypto")
+# --- Interface Lateral (RESTAURADA) ---
+st.sidebar.header("⚙️ Configurações de Análise")
 ticker_input = st.sidebar.text_input("Par (ex: AVAX-USD)", "AVAX-USD")
+
+st.sidebar.divider()
+ja_possui = st.sidebar.checkbox("Já possuo esta moeda?", value=False)
+preco_analista = st.sidebar.number_input("Preço de Compra / Analista ($)", format="%.4f", value=0.0)
 stop_loss_max = st.sidebar.number_input("Stop Loss Máximo (%)", value=4.0)
 
-btn_calcular = st.sidebar.button("🚀 CALCULAR ESTRATÉGIA")
+btn_confirmar = st.sidebar.button("🚀 ATUALIZAR CONSELHEIRO")
 
 # --- Lógica Principal ---
 st.title("🚀 Conselheiro Crypto: Gestor de Risco")
 st.divider()
 
-if btn_calcular:
-    with st.spinner('Acessando mercado...'):
+if btn_confirmar:
+    with st.spinner('Acessando dados em tempo real...'):
         df = buscar_dados_crypto(ticker_input)
     
     if df is not None:
         try:
-            # Extração garantindo valor escalar (float puro)
-            # Usamos .iloc[-1] e garantimos que pegamos apenas o primeiro valor caso haja duplicidade
             def extrair_valor(coluna, index=-1):
                 val = df[coluna].iloc[index]
                 if isinstance(val, (pd.Series, pd.DataFrame)):
@@ -64,9 +57,8 @@ if btn_calcular:
             volume_medio = float(df['Volume'].mean())
             rsi_valor = float(calcular_rsi(df))
             
-            # Máximas 
+            # Máximas 90 e 180 dias
             max_180d = float(df['High'].max())
-            # Garante que tenta pegar 90 dias ou o máximo disponível
             df_90 = df.iloc[-90:] if len(df) >= 90 else df
             max_90d = float(df_90['High'].max())
             
@@ -80,38 +72,19 @@ if btn_calcular:
                 vol_label = "Baixo" if volume_atual < volume_medio else "Alto"
                 st.metric("Volume", vol_label)
 
+            # --- Seção de Posse e Performance ---
+            if ja_possui and preco_analista > 0:
+                st.subheader("💼 Minha Posição")
+                lucro_prejuizo = ((preco_atual - preco_analista) / preco_analista) * 100
+                cor_delta = "normal" if lucro_prejuizo >= 0 else "inverse"
+                
+                c_pos1, c_pos2 = st.columns(2)
+                c_pos1.metric("Preço de Entrada", f"$ {preco_analista:.4f}")
+                c_pos2.metric("Resultado Atual", f"{lucro_prejuizo:.2f}%", delta=f"{lucro_prejuizo:.2f}%", delta_color=cor_delta)
+                st.divider()
+
             # --- Radiografia do Mercado ---
             st.subheader("📊 Radiografia do Mercado")
-            
             c1, c2 = st.columns(2)
             c1.info(f"**Máxima 90 dias:** $ {max_90d:.4f}")
-            c2.info(f"**Máxima 180 dias:** $ {max_180d:.4f}")
-
-            # Lógica de Status
-            if rsi_valor < 35:
-                st.success("🟢 OPORTUNIDADE: Ativo sobrevendido.")
-            elif rsi_valor > 65:
-                st.warning("🔴 ALERTA: Ativo sobrecomprado.")
-            else:
-                st.info("🟡 NEUTRO: Aguarde definição de volume.")
-
-            # --- Gestão de Saída ---
-            st.subheader("🛡️ Gestão de Saída")
-            
-            valor_stop = preco_atual * (1 - (stop_loss_max / 100))
-            alvo_sugerido = preco_atual * 1.20
-
-            col_s1, col_s2 = st.columns(2)
-            col_s1.error(f"Stop Loss Sugerido: $ {valor_stop:.4f}")
-            col_s2.success(f"Alvo Sugerido (+20%): $ {alvo_sugerido:.4f}")
-            
-            distancia_topo = ((max_180d - preco_atual) / max_180d) * 100
-            st.write(f"---")
-            st.write(f"**Análise de Ciclo:** O preço atual está a **{distancia_topo:.1f}%** abaixo da máxima de 180 dias.")
-
-        except Exception as e:
-            st.error(f"Erro técnico no processamento: {e}")
-    else:
-        st.error("Erro: Ticker não encontrado ou API fora do ar.")
-else:
-    st.write("Aguardando comando...")
+            c2.info(f"**Máxima 180 dias
