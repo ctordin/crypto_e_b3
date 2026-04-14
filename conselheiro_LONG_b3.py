@@ -9,44 +9,69 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout="centered")
 
 # ==========================================
-# 2. FUNÇÕES DE BUSCA (Devem vir ANTES da execução)
+# 2. FUNÇÕES DE BUSCA (Devem vir primeiro!)
 # ==========================================
 
 @st.cache_data(ttl=3600)
 def buscar_fundamentos(ticker):
-    """Busca fundamentos usando métodos alternativos para evitar o bloqueio do Yahoo"""
+    """Busca fundamentos com Plano B manual para evitar N/A"""
     try:
         acao = yf.Ticker(ticker)
+        inf = acao.info
         
-        # 1. Tenta buscar o Dividend Yield via histórico de dividendos (mais estável)
-        dy = 0.0
-        try:
+        # Pega dados padrão do Yahoo
+        pl = inf.get('forwardPE') or inf.get('trailingPE') or 0.0
+        dy = (inf.get('dividendYield') or inf.get('trailingAnnualDividendYield') or 0.0) * 100
+        margem = (inf.get('profitMargins') or 0.0) * 100
+
+        # PLANO B: Cálculo manual de DY se o automático falhar (N/A)
+        if dy == 0:
             divs = acao.dividends
             if not divs.empty:
                 ultimos_12m = divs[divs.index > (pd.Timestamp.now() - pd.Timedelta(days=365))]
                 soma_divs = ultimos_12m.sum()
                 hist = acao.history(period="5d")
                 if not hist.empty:
-                    preco_fechamento = hist['Close'].iloc[-1]
-                    dy = (soma_divs / preco_fechamento) * 100
-        except:
-            dy = 0.0
-
-        # 2. Tenta buscar P/L e Margem via Info, mas com tratamento individual
-        pl = 0.0
-        margem = 0.0
-        try:
-            # Pegamos apenas o essencial do info para não sobrecarregar
-            inf = acao.fast_info
-            inf_full = acao.info
-            pl = inf_full.get('forwardPE') or inf_full.get('trailingPE') or 0.0
-            margem = (inf_full.get('profitMargins') or 0.0) * 100
-        except:
-            pass
+                    preco_atual = hist['Close'].iloc[-1]
+                    dy = (soma_divs / preco_atual) * 100
 
         return {"pl": float(pl), "dy": float(dy), "margem": float(margem)}
     except:
         return {"pl": 0.0, "dy": 0.0, "margem": 0.0}
+
+@st.cache_data(ttl=300)
+def buscar_dados_mercado(ticker):
+    """Busca preços e calcula RSI/Médias"""
+    try:
+        df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
+        if df.empty: 
+            return None
+        
+        # Limpeza de colunas MultiIndex (essencial para ativos B3)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        
+        df = df.copy().reset_index()
+        df.rename(columns={'Close': 'fechamento', 'Date': 'data', 'High': 'maxima', 'Volume': 'volume'}, inplace=True)
+        
+        close_series = df['fechamento']
+        if len(close_series.shape) > 1:
+            close_series = close_series.iloc[:, 0]
+
+        # RSI
+        delta = close_series.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss.replace(0, 0.001)
+        df['rsi'] = 100 - (100 / (1 + rs))
+        
+        # Média 50
+        df['sma_50'] = close_series.rolling(window=50).mean()
+        
+        return df.dropna()
+    except:
+        return None
+
 # ==========================================
 # 3. INTERFACE LATERAL
 # ==========================================
@@ -64,14 +89,14 @@ with st.sidebar:
         btn_analisar = st.form_submit_button("🚀 ANALISAR AGORA", use_container_width=True)
 
 # ==========================================
-# 4. PAINEL PRINCIPAL
+# 4. PAINEL PRINCIPAL (A execução vem aqui)
 # ==========================================
 st.title("🏢 Conselheiro B3: Gestor de Posição")
 st.divider()
 
 if btn_analisar:
     with st.spinner("Sincronizando dados..."):
-        # Chamada das funções que agora estão definidas acima
+        # Agora as funções já foram carregadas no topo do arquivo
         df = buscar_dados_mercado(SIMBOLO)
         fund = buscar_fundamentos(SIMBOLO)
         
@@ -83,7 +108,7 @@ if btn_analisar:
             max_180d = float(df['maxima'].tail(180).max())
             max_90d = float(df['maxima'].tail(90).max())
 
-            # DASHBOARD SUPERIOR
+            # DASHBOARD PRINCIPAL
             col1, col2, col3 = st.columns(3)
             col1.metric("Preço Atual", f"R$ {preco_atual:.2f}")
             col2.metric("RSI (14d)", f"{rsi_valor:.1f}")
