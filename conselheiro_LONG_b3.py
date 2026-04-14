@@ -125,3 +125,22 @@ if btn_analisar:
             elif p_atual < m50:
                 st.error(f"🔴 TENDÊNCIA DE BAIXA: Preço abaixo da Média de 50 dias.")
             else:
+                st.info("🟡 NEUTRO: Aguarde definição de volume ou RSI.")
+
+            st.divider()
+
+            # --- LINHA 4: GESTÃO DE SAÍDA ---
+            st.markdown("### 💔 Gestão de Saída / Stop Loss")
+            v_stop = p_atual * (1 - STOP_PCT)
+            v_alvo = p_atual * 1.20 
+            
+            g1, g2 = st.columns(2)
+            g1.error(f"Stop Loss Sugerido: R$ {v_stop:.4f}")
+            g2.success(f"Alvo Sugerido (+20%): R$ {v_alvo:.4f}")
+
+            # --- ANÁLISE DE CICLO ---
+            dist_180 = ((max180 - p_atual) / max180) * 100
+            st.markdown(f"**Análise de Ciclo:** O preço atual está a **{dist_180:.1f}%** abaixo da máxima de 180 dias.")
+
+        else:
+            st.error("Erro ao carregar dados. Verifique o ticker (ex: PETR4.SA).")
