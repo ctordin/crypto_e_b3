@@ -71,7 +71,7 @@ with st.sidebar:
         ALVO_ANALISTA = st.number_input("Alvo do Analista (R$)", value=0.0, step=0.01)
         st.markdown("---")
         STOP_LOSS_PCT = st.number_input("Stop Loss desejado (%)", value=5.0) / 100.0
-        RSI_MAX = st.number_input("RSI Máx. (Entrada)", value=55)
+        RSI_MAX_ENTRADA = st.number_input("RSI Máx. (Entrada)", value=55)
         btn_analisar = st.form_submit_button("🚀 ANALISAR AGORA", use_container_width=True)
 
 # ==========================================
@@ -89,12 +89,13 @@ if btn_analisar:
             atual = df.iloc[-1]
             preco_atual = float(atual['fechamento'])
             rsi_valor = float(atual['rsi'])
+            m50 = float(atual['sma_50'])
             
             # CÁLCULO DE MÁXIMAS
             max_180d = float(df['maxima'].tail(180).max())
             max_90d = float(df['maxima'].tail(90).max())
 
-            # Métricas Superiores (Linha 102 corrigida aqui)
+            # Métricas Superiores
             col1, col2, col3 = st.columns(3)
             col1.metric("Preço Atual", f"R$ {preco_atual:.2f}")
             col2.metric("RSI (14d)", f"{rsi_valor:.1f}")
@@ -107,30 +108,9 @@ if btn_analisar:
                 st.metric("Resultado Atual", f"{lucro_pct:.2f}%", delta=f"{lucro_pct:.2f}%")
                 st.divider()
 
-            # --- RADIOGRAFIA DO MERCADO ---
-            st.subheader("📊 Radiografia do Mercado")
-            r1, r2 = st.columns(2)
-            r1.info(f"**Máxima 90 dias:** R$ {max_90d:.2f}")
-            r2.info(f"**Máxima 180 dias:** R$ {max_180d:.2f}")
-            st.divider()
-
-            # Saúde Financeira
-            if fund:
-                st.subheader("🏥 Saúde da Empresa")
-                f1, f2, f3 = st.columns(3)
-                f1.metric("P/L", f"{fund['pl']:.1f}")
-                f2.metric("Div. Yield", f"{fund['dy']:.1f}%")
-                f3.metric("Margem", f"{fund['margem']:.1f}%")
-                st.divider()
-
-            # Gestão de Risco
-            st.subheader("🛡️ Gestão de Risco")
-            v_stop = preco_atual * (1 - STOP_LOSS_PCT)
-            alvo_sug = ALVO_ANALISTA if ALVO_ANALISTA > 0 else (preco_atual * 1.15)
+            # --- PARECER DO CONSELHEIRO (RESTAURADO) ---
+            st.subheader("📢 Parecer do Conselheiro")
+            tend_alta = preco_atual > m50
             
-            g1, g2 = st.columns(2)
-            g1.error(f"Stop Loss Sugerido: R$ {v_stop:.2f}")
-            g2.success(f"Alvo Estratégico: R$ {alvo_sug:.2f}")
-
-        else:
-            st.error("Erro ao carregar dados. Verifique o ticker (ex: PETR4.SA).")
+            if rsi_valor > 70:
+                st.warning(f"⚠️ SOBRECOMPRADO: RSI em {
