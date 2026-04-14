@@ -9,35 +9,71 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout="centered")
 
 # ==========================================
-# 2. FUNÇÕES DE BUSCA
+# 2. FUNÇÕES DE BUSCA (Devem vir ANTES da execução)
 # ==========================================
 
 @st.cache_data(ttl=3600)
 def buscar_fundamentos(ticker):
-    """Busca fundamentos com Plano B de cálculo manual caso o Yahoo falhe"""
+    """Busca fundamentos com Plano B de cálculo manual para Dividendos"""
     try:
         acao = yf.Ticker(ticker)
         inf = acao.info
         
-        # Tenta pegar do automático primeiro
+        # Pega dados padrão do Yahoo
         pl = inf.get('forwardPE') or inf.get('trailingPE') or 0.0
         dy = (inf.get('dividendYield') or inf.get('trailingAnnualDividendYield') or 0.0) * 100
         margem = (inf.get('profitMargins') or 0.0) * 100
 
-        # PLANO B: Se vieram zerados, tenta calcular manualmente o DY
+        # PLANO B: Cálculo manual de DY se o automático vier zerado
         if dy == 0:
             divs = acao.dividends
             if not divs.empty:
-                # Soma dividendos dos últimos 365 dias
+                # Soma dividendos dos últimos 12 meses
                 ultimos_12m = divs[divs.index > (pd.Timestamp.now() - pd.Timedelta(days=365))]
                 soma_divs = ultimos_12m.sum()
-                preco_atual = acao.history(period="1d")['Close'].iloc[-1]
-                dy = (soma_divs / preco_atual) * 100
+                # Busca preço de fechamento atual para a conta
+                hist = acao.history(period="5d")
+                if not hist.empty:
+                    preco_atual = hist['Close'].iloc[-1]
+                    dy = (soma_divs / preco_atual) * 100
 
         return {"pl": float(pl), "dy": float(dy), "margem": float(margem)}
     except:
         return {"pl": 0.0, "dy": 0.0, "margem": 0.0}
+
+@st.cache_data(ttl=300)
+def buscar_dados_mercado(ticker):
+    """Busca preços e calcula RSI/Médias (Blindado para B3)"""
+    try:
+        df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
+        if df.empty: 
+            return None
         
+        # Ajuste para colunas MultiIndex
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        
+        df = df.copy().reset_index()
+        df.rename(columns={'Close': 'fechamento', 'Date': 'data', 'High': 'maxima', 'Volume': 'volume'}, inplace=True)
+        
+        close_series = df['fechamento']
+        if len(close_series.shape) > 1:
+            close_series = close_series.iloc[:, 0]
+
+        # RSI
+        delta = close_series.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss.replace(0, 0.001)
+        df['rsi'] = 100 - (100 / (1 + rs))
+        
+        # Média Móvel 50
+        df['sma_50'] = close_series.rolling(window=50).mean()
+        
+        return df.dropna()
+    except:
+        return None
+
 # ==========================================
 # 3. INTERFACE LATERAL
 # ==========================================
@@ -62,7 +98,7 @@ st.divider()
 
 if btn_analisar:
     with st.spinner("Sincronizando dados..."):
-        # GARANTE QUE AS VARIÁVEIS SEJAM DEFINIDAS
+        # Chamada das funções que agora estão definidas acima
         df = buscar_dados_mercado(SIMBOLO)
         fund = buscar_fundamentos(SIMBOLO)
         
@@ -72,44 +108,57 @@ if btn_analisar:
             rsi_valor = float(atual['rsi'])
             m50 = float(atual['sma_50'])
             max_180d = float(df['maxima'].tail(180).max())
-            
-            # 1. Métricas de Topo
+            max_90d = float(df['maxima'].tail(90).max())
+
+            # DASHBOARD SUPERIOR
             col1, col2, col3 = st.columns(3)
             col1.metric("Preço Atual", f"R$ {preco_atual:.2f}")
             col2.metric("RSI (14d)", f"{rsi_valor:.1f}")
             dist_topo = ((max_180d - preco_atual) / max_180d) * 100
             col3.metric("Dist. do Topo", f"{dist_topo:.1f}%")
 
-            # 2. Parecer
+            # PARECER TÉCNICO
             st.subheader("📢 Parecer do Conselheiro")
+            tend_alta = preco_atual > m50
             if rsi_valor > 70:
-                st.warning("⚠️ SOBRECOMPRADO: Aguarde correção.")
-            elif preco_atual > m50 and rsi_valor < RSI_MAX_ENTRADA:
-                st.success("🟢 COMPRA/APORTE: Tendência de alta e RSI favorável.")
-            elif preco_atual < m50:
-                st.error("🔴 TENDÊNCIA DE BAIXA: Evite compras agora.")
+                st.warning(f"⚠️ SOBRECOMPRADO: RSI em {rsi_valor:.1f}. Aguarde correção.")
+            elif tend_alta and rsi_valor < RSI_MAX_ENTRADA:
+                st.success("🟢 COMPRA/APORTE: Tendência de alta e RSI em zona de desconto.")
+            elif not tend_alta:
+                st.error("🔴 TENDÊNCIA DE BAIXA: Preço abaixo da média de 50 dias.")
             else:
-                st.info("🟡 NEUTRO: Aguarde melhor sinal de RSI.")
-
-            # 3. SAÚDE DA EMPRESA (FUNDAMENTALISTA) - BLOCO CORRIGIDO
+                st.info("🟡 NEUTRO: Tendência de alta, mas aguarde melhor RSI.")
             st.divider()
+
+            # INDICADORES FUNDAMENTALISTAS
             st.subheader("🏥 Saúde da Empresa (Fundamentalista)")
             f1, f2, f3 = st.columns(3)
             
-            # Verifica se os dados são válidos antes de exibir
-            if fund and (fund['pl'] > 0 or fund['dy'] > 0 or fund['margem'] > 0):
-                f1.metric("P/L (Valuation)", f"{fund['pl']:.1f}")
-                f2.metric("Dividend Yield", f"{fund['dy']:.2f}%")
-                f3.metric("Margem Líquida", f"{fund['margem']:.1f}%")
-            else:
-                st.info("ℹ️ Indicadores fundamentalistas não disponíveis no Yahoo para este ticker.")
+            val_pl = f"{fund['pl']:.1f}" if fund['pl'] > 0 else "N/A"
+            f1.metric("P/L (Valuation)", val_pl)
+            
+            val_dy = f"{fund['dy']:.2f}%" if fund['dy'] > 0 else "N/A"
+            f2.metric("Dividend Yield", val_dy)
+            
+            val_mg = f"{fund['margem']:.1f}%" if fund['margem'] > 0 else "N/A"
+            f3.metric("Margem Líquida", val_mg)
+            st.divider()
 
-            # 4. Gestão de Risco
+            # RADIOGRAFIA DE MERCADO
+            st.subheader("📊 Radiografia do Mercado")
+            r1, r2 = st.columns(2)
+            r1.info(f"**Máxima 90 dias:** R$ {max_90d:.2f}")
+            r2.info(f"**Máxima 180 dias:** R$ {max_180d:.2f}")
+
+            # GESTÃO DE RISCO
             st.divider()
             st.subheader("🛡️ Gestão de Risco")
             v_stop = preco_atual * (1 - STOP_LOSS_PCT)
-            st.error(f"Stop Loss Sugerido: R$ {v_stop:.2f}")
-            st.success(f"Alvo Estratégico (+15%): R$ {preco_atual * 1.15:.2f}")
+            alvo_sug = ALVO_ANALISTA if ALVO_ANALISTA > 0 else (preco_atual * 1.15)
+            
+            g1, g2 = st.columns(2)
+            g1.error(f"Stop Loss Sugerido: R$ {v_stop:.2f}")
+            g2.success(f"Alvo Estratégico: R$ {alvo_sug:.2f}")
 
         else:
             st.error("Erro ao carregar dados. Verifique o ticker (ex: PETR4.SA).")
