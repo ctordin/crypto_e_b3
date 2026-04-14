@@ -14,54 +14,39 @@ st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout=
 
 @st.cache_data(ttl=3600)
 def buscar_fundamentos(ticker):
-    """Busca indicadores fundamentalistas principais"""
+    """Busca indicadores fundamentalistas com tratamento de erro robusto"""
     try:
         acao = yf.Ticker(ticker)
+        # Força uma atualização rápida dos dados de info
         inf = acao.info
-        # Se não encontrar dados no 'info', tentamos retornar um dicionário com zeros
-        if not inf: 
+        
+        if not inf or len(inf) < 10:
             return {"pl": 0.0, "dy": 0.0, "margem": 0.0}
-            
+
+        # Tentativa de captura múltipla (alguns ativos usam chaves diferentes)
+        pl = inf.get('forwardPE') or inf.get('trailingPE') or inf.get('regularMarketPrice', 0) / inf.get('trailingEps', 1) if inf.get('trailingEps') else 0.0
+        dy = (inf.get('dividendYield') or inf.get('trailingAnnualDividendYield') or 0.0) * 100
+        margem = (inf.get('profitMargins') or inf.get('ebitdaMargins') or 0.0) * 100
+
         return {
-            "pl": inf.get('forwardPE') or inf.get('trailingPE') or 0.0,
-            "dy": (inf.get('dividendYield') or 0.0) * 100,
-            "margem": (inf.get('profitMargins') or 0.0) * 100
+            "pl": float(pl),
+            "dy": float(dy),
+            "margem": float(margem)
         }
     except:
         return {"pl": 0.0, "dy": 0.0, "margem": 0.0}
 
-@st.cache_data(ttl=300)
-def buscar_dados_mercado(ticker):
-    """Busca preços e calcula indicadores técnicos"""
-    try:
-        df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
-        if df.empty: 
-            return None
-        
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        
-        df = df.copy().reset_index()
-        df.rename(columns={'Close': 'fechamento', 'Date': 'data', 'High': 'maxima', 'Volume': 'volume'}, inplace=True)
-        
-        close_series = df['fechamento']
-        if len(close_series.shape) > 1:
-            close_series = close_series.iloc[:, 0]
+# --- No bloco de exibição (dentro do if btn_analisar) ---
+st.subheader("🏥 Saúde da Empresa (Fundamentalista)")
+f1, f2, f3 = st.columns(3)
 
-        # RSI
-        delta = close_series.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss.replace(0, 0.001)
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
-        # Média 50
-        df['sma_50'] = close_series.rolling(window=50).mean()
-        
-        return df.dropna()
-    except:
-        return None
-
+# Lógica de exibição com validação
+if fund and (fund['pl'] != 0 or fund['dy'] != 0):
+    f1.metric("P/L (Valuation)", f"{fund['pl']:.1f}")
+    f2.metric("Dividend Yield", f"{fund['dy']:.2f}%")
+    f3.metric("Margem Líquida", f"{fund['margem']:.1f}%")
+else:
+    st.warning("⚠️ Dados fundamentalistas temporariamente indisponíveis no Yahoo Finance para este ativo. Tente novamente em instantes.")
 # ==========================================
 # 3. INTERFACE LATERAL
 # ==========================================
