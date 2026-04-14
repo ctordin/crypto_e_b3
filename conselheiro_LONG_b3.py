@@ -14,6 +14,7 @@ st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout=
 
 @st.cache_data(ttl=3600)
 def buscar_fundamentos(ticker):
+    """Busca os 3 principais indicadores fundamentalistas"""
     try:
         acao = yf.Ticker(ticker)
         inf = acao.info
@@ -29,11 +30,13 @@ def buscar_fundamentos(ticker):
 
 @st.cache_data(ttl=300)
 def buscar_dados_mercado(ticker):
+    """Busca preços e calcula indicadores técnicos (Blindado para B3)"""
     try:
         df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
         if df.empty: 
             return None
         
+        # Ajuste para colunas MultiIndex
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
@@ -51,7 +54,7 @@ def buscar_dados_mercado(ticker):
         rs = gain / loss.replace(0, 0.001)
         df['rsi'] = 100 - (100 / (1 + rs))
         
-        # Média 50
+        # Média Móvel 50 (Tendência Macro)
         df['sma_50'] = close_series.rolling(window=50).mean()
         
         return df.dropna()
@@ -81,7 +84,7 @@ st.title("🏢 Conselheiro B3: Gestor de Posição")
 st.divider()
 
 if btn_analisar:
-    with st.spinner("Sincronizando dados..."):
+    with st.spinner("Sincronizando dados técnicos e fundamentalistas..."):
         df = buscar_dados_mercado(SIMBOLO)
         fund = buscar_fundamentos(SIMBOLO)
         
@@ -91,11 +94,11 @@ if btn_analisar:
             rsi_valor = float(atual['rsi'])
             m50 = float(atual['sma_50'])
             
-            # CÁLCULO DE MÁXIMAS
+            # Máximas para Radiografia
             max_180d = float(df['maxima'].tail(180).max())
             max_90d = float(df['maxima'].tail(90).max())
 
-            # Métricas Superiores
+            # DASHBOARD SUPERIOR
             col1, col2, col3 = st.columns(3)
             col1.metric("Preço Atual", f"R$ {preco_atual:.2f}")
             col2.metric("RSI (14d)", f"{rsi_valor:.1f}")
@@ -108,37 +111,36 @@ if btn_analisar:
                 st.metric("Resultado Atual", f"{lucro_pct:.2f}%", delta=f"{lucro_pct:.2f}%")
                 st.divider()
 
-            # --- PARECER DO CONSELHEIRO (RESTAURADO) ---
+            # PARECER TÉCNICO
             st.subheader("📢 Parecer do Conselheiro")
             tend_alta = preco_atual > m50
-            
             if rsi_valor > 70:
-                st.warning(f"⚠️ SOBRECOMPRADO: RSI em {rsi_valor:.1f}. O papel está esticado, risco de correção alto.")
+                st.warning(f"⚠️ SOBRECOMPRADO: RSI em {rsi_valor:.1f}. Aguarde correção.")
             elif tend_alta and rsi_valor < RSI_MAX_ENTRADA:
-                st.success("🟢 COMPRA/APORTE: Tendência de alta confirmada com RSI em zona de desconto.")
+                st.success("🟢 COMPRA/APORTE: Tendência de alta e RSI em zona de desconto.")
             elif not tend_alta:
-                st.error("🔴 TENDÊNCIA DE BAIXA: Preço abaixo da média de 50 dias. Evite novas entradas.")
+                st.error("🔴 TENDÊNCIA DE BAIXA: Preço abaixo da média de 50 dias.")
             else:
-                st.info("🟡 NEUTRO: Papel em tendência de alta, mas aguarde o RSI baixar para melhorar a entrada.")
+                st.info("🟡 NEUTRO: Tendência de alta, mas aguarde melhor RSI.")
             st.divider()
 
-            # Radiografia do Mercado
+            # INDICADORES FUNDAMENTALISTAS (RESTAURADOS)
+            if fund:
+                st.subheader("🏥 Saúde da Empresa (Fundamentalista)")
+                f1, f2, f3 = st.columns(3)
+                f1.metric("P/L (Valuation)", f"{fund['pl']:.1f}", help="Preço sobre Lucro. Quanto menor, teoricamente mais barata.")
+                f2.metric("Dividend Yield", f"{fund['dy']:.2f}%", help="Rendimento de dividendos nos últimos 12 meses.")
+                f3.metric("Margem Líquida", f"{fund['margem']:.1f}%", help="Quanto da receita vira lucro real.")
+                st.divider()
+
+            # RADIOGRAFIA DE MERCADO
             st.subheader("📊 Radiografia do Mercado")
             r1, r2 = st.columns(2)
             r1.info(f"**Máxima 90 dias:** R$ {max_90d:.2f}")
             r2.info(f"**Máxima 180 dias:** R$ {max_180d:.2f}")
             st.divider()
 
-            # Saúde Financeira
-            if fund:
-                st.subheader("🏥 Saúde da Empresa")
-                f1, f2, f3 = st.columns(3)
-                f1.metric("P/L", f"{fund['pl']:.1f}")
-                f2.metric("Div. Yield", f"{fund['dy']:.1f}%")
-                f3.metric("Margem", f"{fund['margem']:.1f}%")
-                st.divider()
-
-            # Gestão de Risco
+            # GESTÃO DE RISCO
             st.subheader("🛡️ Gestão de Risco")
             v_stop = preco_atual * (1 - STOP_LOSS_PCT)
             alvo_sug = ALVO_ANALISTA if ALVO_ANALISTA > 0 else (preco_atual * 1.15)
