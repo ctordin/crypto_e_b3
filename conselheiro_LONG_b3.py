@@ -113,4 +113,39 @@ if btn_analisar:
             tend_alta = preco_atual > m50
             
             if rsi_valor > 70:
-                st.warning(f"⚠️ SOBRECOMPRADO: RSI em {
+                st.warning(f"⚠️ SOBRECOMPRADO: RSI em {rsi_valor:.1f}. O papel está esticado, risco de correção alto.")
+            elif tend_alta and rsi_valor < RSI_MAX_ENTRADA:
+                st.success("🟢 COMPRA/APORTE: Tendência de alta confirmada com RSI em zona de desconto.")
+            elif not tend_alta:
+                st.error("🔴 TENDÊNCIA DE BAIXA: Preço abaixo da média de 50 dias. Evite novas entradas.")
+            else:
+                st.info("🟡 NEUTRO: Papel em tendência de alta, mas aguarde o RSI baixar para melhorar a entrada.")
+            st.divider()
+
+            # Radiografia do Mercado
+            st.subheader("📊 Radiografia do Mercado")
+            r1, r2 = st.columns(2)
+            r1.info(f"**Máxima 90 dias:** R$ {max_90d:.2f}")
+            r2.info(f"**Máxima 180 dias:** R$ {max_180d:.2f}")
+            st.divider()
+
+            # Saúde Financeira
+            if fund:
+                st.subheader("🏥 Saúde da Empresa")
+                f1, f2, f3 = st.columns(3)
+                f1.metric("P/L", f"{fund['pl']:.1f}")
+                f2.metric("Div. Yield", f"{fund['dy']:.1f}%")
+                f3.metric("Margem", f"{fund['margem']:.1f}%")
+                st.divider()
+
+            # Gestão de Risco
+            st.subheader("🛡️ Gestão de Risco")
+            v_stop = preco_atual * (1 - STOP_LOSS_PCT)
+            alvo_sug = ALVO_ANALISTA if ALVO_ANALISTA > 0 else (preco_atual * 1.15)
+            
+            g1, g2 = st.columns(2)
+            g1.error(f"Stop Loss Sugerido: R$ {v_stop:.2f}")
+            g2.success(f"Alvo Estratégico: R$ {alvo_sug:.2f}")
+
+        else:
+            st.error("Erro ao carregar dados. Verifique o ticker (ex: PETR4.SA).")
