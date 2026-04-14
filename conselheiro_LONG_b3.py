@@ -1,6 +1,7 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import fundamentus
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -13,34 +14,27 @@ st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout=
 # ==========================================
 
 @st.cache_data(ttl=3600)
-def buscar_fundamentos(ticker):
-    """Busca fundamentos com proteção contra bloqueio do Yahoo"""
+def buscar_fundamentos_alternativo(ticker):
+    """Busca fundamentos no site Fundamentus (Mais estável para B3)"""
     try:
-        acao = yf.Ticker(ticker)
-        inf = acao.info
+        # Remove o .SA para o fundamentus
+        t_limpo = ticker.replace(".SA", "").strip()
+        df_f = fundamentus.get_papel(t_limpo)
         
-        # Pega dados padrão do Yahoo
-        pl = inf.get('forwardPE') or inf.get('trailingPE') or 0.0
-        dy = (inf.get('dividendYield') or inf.get('trailingAnnualDividendYield') or 0.0) * 100
-        margem = (inf.get('profitMargins') or 0.0) * 100
-
-        # Plano B: Cálculo manual de DY
-        if dy == 0:
-            divs = acao.dividends
-            if not divs.empty:
-                ultimos_12m = divs[divs.index > (pd.Timestamp.now() - pd.Timedelta(days=365))]
-                if not ultimos_12m.empty:
-                    hist = acao.history(period="5d")
-                    if not hist.empty:
-                        dy = (ultimos_12m.sum() / hist['Close'].iloc[-1]) * 100
-
-        return {"pl": float(pl), "dy": float(dy), "margem": float(margem)}
+        if df_f.empty:
+            return None
+            
+        return {
+            "pl": float(df_f['pl'].iloc[0]) / 100, # Ajuste de escala do fundamentus
+            "dy": float(df_f['dy'].iloc[0]) / 100,
+            "margem": float(df_f['mrg_liq'].iloc[0]) / 100
+        }
     except:
         return None
 
 @st.cache_data(ttl=300)
 def buscar_dados_mercado(ticker):
-    """Busca preços e calcula RSI/Médias"""
+    """Busca preços no Yahoo (que continua bom para gráfico)"""
     try:
         df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
         if df.empty: return None
@@ -85,13 +79,10 @@ with st.sidebar:
 st.title("🏢 Conselheiro B3: Gestor de Posição")
 st.divider()
 
-# Variável inicial para evitar o NameError
-fund = None
-
 if btn_analisar:
-    with st.spinner("Sincronizando dados..."):
+    with st.spinner("Buscando Técnica (Yahoo) e Fundamentos (Fundamentus)..."):
         df = buscar_dados_mercado(SIMBOLO)
-        fund = buscar_fundamentos(SIMBOLO)
+        fund = buscar_fundamentos_alternativo(SIMBOLO)
         
         if df is not None:
             atual = df.iloc[-1]
@@ -99,8 +90,7 @@ if btn_analisar:
             rsi_valor = float(atual['rsi'])
             m50 = float(atual['sma_50'])
             max_180d = float(df['maxima'].tail(180).max())
-            max_90d = float(df['maxima'].tail(90).max())
-
+            
             # 1. Dash Principal
             col1, col2, col3 = st.columns(3)
             col1.metric("Preço Atual", f"R$ {preco_atual:.2f}")
@@ -111,9 +101,9 @@ if btn_analisar:
             # 2. Parecer
             st.subheader("📢 Parecer do Conselheiro")
             if rsi_valor > 70:
-                st.warning(f"⚠️ SOBRECOMPRADO: RSI em {rsi_valor:.1f}. Aguarde correção.")
+                st.warning(f"⚠️ SOBRECOMPRADO: RSI em {rsi_valor:.1f}. Risco de correção.")
             elif preco_atual > m50 and rsi_valor < RSI_MAX_ENTRADA:
-                st.success("🟢 COMPRA/APORTE: Tendência de alta e RSI em zona de desconto.")
+                st.success("🟢 COMPRA/APORTE: Tendência de alta e RSI favorável.")
             elif preco_atual < m50:
                 st.error("🔴 TENDÊNCIA DE BAIXA: Preço abaixo da média de 50 dias.")
             else:
@@ -121,22 +111,16 @@ if btn_analisar:
             
             # 3. Saúde da Empresa (Fundamentalista)
             st.divider()
-            st.subheader("🏥 Saúde da Empresa (Fundamentalista)")
+            st.subheader("🏥 Saúde da Empresa (Fundamentus)")
             if fund:
                 f1, f2, f3 = st.columns(3)
-                f1.metric("P/L", f"{fund['pl']:.1f}" if fund['pl'] > 0 else "N/A")
-                f2.metric("Div. Yield", f"{fund['dy']:.2f}%" if fund['dy'] > 0 else "N/A")
-                f3.metric("Margem", f"{fund['margem']:.1f}%" if fund['margem'] > 0 else "N/A")
+                f1.metric("P/L", f"{fund['pl']:.2f}")
+                f2.metric("Div. Yield", f"{fund['dy']:.2f}%")
+                f3.metric("Margem Líquida", f"{fund['margem']:.2f}%")
             else:
-                st.info("ℹ️ Dados fundamentalistas indisponíveis no momento. Foco na Análise Técnica.")
+                st.warning("⚠️ Dados do Fundamentus não encontrados para este ticker.")
 
             # 4. Radiografia e Risco
-            st.divider()
-            st.subheader("📊 Radiografia do Mercado")
-            r1, r2 = st.columns(2)
-            r1.info(f"**Máxima 90 dias:** R$ {max_90d:.2f}")
-            r2.info(f"**Máxima 180 dias:** R$ {max_180d:.2f}")
-
             st.divider()
             st.subheader("🛡️ Gestão de Risco")
             v_stop = preco_atual * (1 - STOP_LOSS_PCT)
@@ -146,4 +130,4 @@ if btn_analisar:
             g2.success(f"Alvo Estratégico: R$ {alvo_sug:.2f}")
 
         else:
-            st.error("Erro ao carregar dados. Verifique o ticker (ex: PETR4.SA).")
+            st.error("Erro ao carregar dados técnicos. Verifique o ticker.")
