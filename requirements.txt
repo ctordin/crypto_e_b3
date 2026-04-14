@@ -4,3 +4,4 @@ ccxt
 yfinance
 requests
 openpyxl
+fundamentus
