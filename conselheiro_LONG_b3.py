@@ -14,29 +14,30 @@ st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout=
 
 @st.cache_data(ttl=3600)
 def buscar_fundamentos(ticker):
-    """Busca os 3 principais indicadores fundamentalistas"""
+    """Busca indicadores fundamentalistas principais"""
     try:
         acao = yf.Ticker(ticker)
         inf = acao.info
-        if not inf or len(inf) < 5: 
-            return None
+        # Se não encontrar dados no 'info', tentamos retornar um dicionário com zeros
+        if not inf: 
+            return {"pl": 0.0, "dy": 0.0, "margem": 0.0}
+            
         return {
-            "pl": inf.get('forwardPE') or inf.get('trailingPE') or 0,
-            "dy": (inf.get('dividendYield') or 0) * 100,
-            "margem": (inf.get('profitMargins') or 0) * 100
+            "pl": inf.get('forwardPE') or inf.get('trailingPE') or 0.0,
+            "dy": (inf.get('dividendYield') or 0.0) * 100,
+            "margem": (inf.get('profitMargins') or 0.0) * 100
         }
     except:
-        return None
+        return {"pl": 0.0, "dy": 0.0, "margem": 0.0}
 
 @st.cache_data(ttl=300)
 def buscar_dados_mercado(ticker):
-    """Busca preços e calcula indicadores técnicos (Blindado para B3)"""
+    """Busca preços e calcula indicadores técnicos"""
     try:
         df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
         if df.empty: 
             return None
         
-        # Ajuste para colunas MultiIndex
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
@@ -54,7 +55,7 @@ def buscar_dados_mercado(ticker):
         rs = gain / loss.replace(0, 0.001)
         df['rsi'] = 100 - (100 / (1 + rs))
         
-        # Média Móvel 50 (Tendência Macro)
+        # Média 50
         df['sma_50'] = close_series.rolling(window=50).mean()
         
         return df.dropna()
@@ -84,7 +85,7 @@ st.title("🏢 Conselheiro B3: Gestor de Posição")
 st.divider()
 
 if btn_analisar:
-    with st.spinner("Sincronizando dados técnicos e fundamentalistas..."):
+    with st.spinner("Sincronizando dados..."):
         df = buscar_dados_mercado(SIMBOLO)
         fund = buscar_fundamentos(SIMBOLO)
         
@@ -94,11 +95,10 @@ if btn_analisar:
             rsi_valor = float(atual['rsi'])
             m50 = float(atual['sma_50'])
             
-            # Máximas para Radiografia
             max_180d = float(df['maxima'].tail(180).max())
             max_90d = float(df['maxima'].tail(90).max())
 
-            # DASHBOARD SUPERIOR
+            # DASHBOARD PRINCIPAL
             col1, col2, col3 = st.columns(3)
             col1.metric("Preço Atual", f"R$ {preco_atual:.2f}")
             col2.metric("RSI (14d)", f"{rsi_valor:.1f}")
@@ -124,14 +124,23 @@ if btn_analisar:
                 st.info("🟡 NEUTRO: Tendência de alta, mas aguarde melhor RSI.")
             st.divider()
 
-            # INDICADORES FUNDAMENTALISTAS (RESTAURADOS)
-            if fund:
-                st.subheader("🏥 Saúde da Empresa (Fundamentalista)")
-                f1, f2, f3 = st.columns(3)
-                f1.metric("P/L (Valuation)", f"{fund['pl']:.1f}", help="Preço sobre Lucro. Quanto menor, teoricamente mais barata.")
-                f2.metric("Dividend Yield", f"{fund['dy']:.2f}%", help="Rendimento de dividendos nos últimos 12 meses.")
-                f3.metric("Margem Líquida", f"{fund['margem']:.1f}%", help="Quanto da receita vira lucro real.")
-                st.divider()
+            # INDICADORES FUNDAMENTALISTAS (FORÇADOS)
+            st.subheader("🏥 Saúde da Empresa (Fundamentalista)")
+            f1, f2, f3 = st.columns(3)
+            
+            # P/L
+            val_pl = f"{fund['pl']:.1f}" if fund['pl'] != 0 else "N/A"
+            f1.metric("P/L (Valuation)", val_pl)
+            
+            # DY
+            val_dy = f"{fund['dy']:.2f}%" if fund['dy'] != 0 else "N/A"
+            f2.metric("Dividend Yield", val_dy)
+            
+            # Margem
+            val_mg = f"{fund['margem']:.1f}%" if fund['margem'] != 0 else "N/A"
+            f3.metric("Margem Líquida", val_mg)
+            
+            st.divider()
 
             # RADIOGRAFIA DE MERCADO
             st.subheader("📊 Radiografia do Mercado")
