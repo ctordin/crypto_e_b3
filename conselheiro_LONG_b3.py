@@ -14,66 +14,39 @@ st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout=
 
 @st.cache_data(ttl=3600)
 def buscar_fundamentos(ticker):
-    """Busca fundamentos com Plano B de cálculo manual para Dividendos"""
+    """Busca fundamentos usando métodos alternativos para evitar o bloqueio do Yahoo"""
     try:
         acao = yf.Ticker(ticker)
-        inf = acao.info
         
-        # Pega dados padrão do Yahoo
-        pl = inf.get('forwardPE') or inf.get('trailingPE') or 0.0
-        dy = (inf.get('dividendYield') or inf.get('trailingAnnualDividendYield') or 0.0) * 100
-        margem = (inf.get('profitMargins') or 0.0) * 100
-
-        # PLANO B: Cálculo manual de DY se o automático vier zerado
-        if dy == 0:
+        # 1. Tenta buscar o Dividend Yield via histórico de dividendos (mais estável)
+        dy = 0.0
+        try:
             divs = acao.dividends
             if not divs.empty:
-                # Soma dividendos dos últimos 12 meses
                 ultimos_12m = divs[divs.index > (pd.Timestamp.now() - pd.Timedelta(days=365))]
                 soma_divs = ultimos_12m.sum()
-                # Busca preço de fechamento atual para a conta
                 hist = acao.history(period="5d")
                 if not hist.empty:
-                    preco_atual = hist['Close'].iloc[-1]
-                    dy = (soma_divs / preco_atual) * 100
+                    preco_fechamento = hist['Close'].iloc[-1]
+                    dy = (soma_divs / preco_fechamento) * 100
+        except:
+            dy = 0.0
+
+        # 2. Tenta buscar P/L e Margem via Info, mas com tratamento individual
+        pl = 0.0
+        margem = 0.0
+        try:
+            # Pegamos apenas o essencial do info para não sobrecarregar
+            inf = acao.fast_info
+            inf_full = acao.info
+            pl = inf_full.get('forwardPE') or inf_full.get('trailingPE') or 0.0
+            margem = (inf_full.get('profitMargins') or 0.0) * 100
+        except:
+            pass
 
         return {"pl": float(pl), "dy": float(dy), "margem": float(margem)}
     except:
         return {"pl": 0.0, "dy": 0.0, "margem": 0.0}
-
-@st.cache_data(ttl=300)
-def buscar_dados_mercado(ticker):
-    """Busca preços e calcula RSI/Médias (Blindado para B3)"""
-    try:
-        df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
-        if df.empty: 
-            return None
-        
-        # Ajuste para colunas MultiIndex
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        
-        df = df.copy().reset_index()
-        df.rename(columns={'Close': 'fechamento', 'Date': 'data', 'High': 'maxima', 'Volume': 'volume'}, inplace=True)
-        
-        close_series = df['fechamento']
-        if len(close_series.shape) > 1:
-            close_series = close_series.iloc[:, 0]
-
-        # RSI
-        delta = close_series.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss.replace(0, 0.001)
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
-        # Média Móvel 50
-        df['sma_50'] = close_series.rolling(window=50).mean()
-        
-        return df.dropna()
-    except:
-        return None
-
 # ==========================================
 # 3. INTERFACE LATERAL
 # ==========================================
