@@ -14,49 +14,30 @@ st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout=
 
 @st.cache_data(ttl=3600)
 def buscar_fundamentos(ticker):
-    """Busca indicadores fundamentalistas com tratamento de erro robusto"""
+    """Busca fundamentos com Plano B de cálculo manual caso o Yahoo falhe"""
     try:
         acao = yf.Ticker(ticker)
         inf = acao.info
         
-        if not inf or len(inf) < 5:
-            return {"pl": 0.0, "dy": 0.0, "margem": 0.0}
-
-        # Captura flexível de chaves do Yahoo
+        # Tenta pegar do automático primeiro
         pl = inf.get('forwardPE') or inf.get('trailingPE') or 0.0
         dy = (inf.get('dividendYield') or inf.get('trailingAnnualDividendYield') or 0.0) * 100
         margem = (inf.get('profitMargins') or 0.0) * 100
 
+        # PLANO B: Se vieram zerados, tenta calcular manualmente o DY
+        if dy == 0:
+            divs = acao.dividends
+            if not divs.empty:
+                # Soma dividendos dos últimos 365 dias
+                ultimos_12m = divs[divs.index > (pd.Timestamp.now() - pd.Timedelta(days=365))]
+                soma_divs = ultimos_12m.sum()
+                preco_atual = acao.history(period="1d")['Close'].iloc[-1]
+                dy = (soma_divs / preco_atual) * 100
+
         return {"pl": float(pl), "dy": float(dy), "margem": float(margem)}
     except:
         return {"pl": 0.0, "dy": 0.0, "margem": 0.0}
-
-@st.cache_data(ttl=300)
-def buscar_dados_mercado(ticker):
-    """Busca preços e calcula RSI/Médias"""
-    try:
-        df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
-        if df.empty: return None
         
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        
-        df = df.copy().reset_index()
-        df.rename(columns={'Close': 'fechamento', 'Date': 'data', 'High': 'maxima', 'Volume': 'volume'}, inplace=True)
-        
-        close_series = df['fechamento']
-        if len(close_series.shape) > 1: close_series = close_series.iloc[:, 0]
-
-        delta = close_series.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss.replace(0, 0.001)
-        df['rsi'] = 100 - (100 / (1 + rs))
-        df['sma_50'] = close_series.rolling(window=50).mean()
-        
-        return df.dropna()
-    except: return None
-
 # ==========================================
 # 3. INTERFACE LATERAL
 # ==========================================
