@@ -14,64 +14,34 @@ st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout=
 
 @st.cache_data(ttl=3600)
 def buscar_fundamentos(ticker):
-    """Busca fundamentos com Plano B manual para evitar N/A"""
+    """Busca fundamentos com proteção total contra bloqueio (Silent Fail)"""
     try:
         acao = yf.Ticker(ticker)
+        # Tenta pegar apenas o Dividend Yield que é o mais importante e falha menos
+        divs = acao.dividends
+        dy = 0.0
+        if not divs.empty:
+            ultimos_12m = divs[divs.index > (pd.Timestamp.now() - pd.Timedelta(days=365))]
+            dy = (ultimos_12m.sum() / acao.history(period="1d")['Close'].iloc[-1]) * 100
+            
         inf = acao.info
-        
-        # Pega dados padrão do Yahoo
-        pl = inf.get('forwardPE') or inf.get('trailingPE') or 0.0
-        dy = (inf.get('dividendYield') or inf.get('trailingAnnualDividendYield') or 0.0) * 100
-        margem = (inf.get('profitMargins') or 0.0) * 100
-
-        # PLANO B: Cálculo manual de DY se o automático falhar (N/A)
-        if dy == 0:
-            divs = acao.dividends
-            if not divs.empty:
-                ultimos_12m = divs[divs.index > (pd.Timestamp.now() - pd.Timedelta(days=365))]
-                soma_divs = ultimos_12m.sum()
-                hist = acao.history(period="5d")
-                if not hist.empty:
-                    preco_atual = hist['Close'].iloc[-1]
-                    dy = (soma_divs / preco_atual) * 100
-
-        return {"pl": float(pl), "dy": float(dy), "margem": float(margem)}
+        return {
+            "pl": inf.get('forwardPE') or inf.get('trailingPE') or 0.0,
+            "dy": dy if dy > 0 else (inf.get('dividendYield', 0) * 100),
+            "margem": (inf.get('profitMargins') or 0.0) * 100
+        }
     except:
-        return {"pl": 0.0, "dy": 0.0, "margem": 0.0}
+        return None # Retorna None para o app saber que o Yahoo bloqueou
 
-@st.cache_data(ttl=300)
-def buscar_dados_mercado(ticker):
-    """Busca preços e calcula RSI/Médias"""
-    try:
-        df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
-        if df.empty: 
-            return None
-        
-        # Limpeza de colunas MultiIndex (essencial para ativos B3)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        
-        df = df.copy().reset_index()
-        df.rename(columns={'Close': 'fechamento', 'Date': 'data', 'High': 'maxima', 'Volume': 'volume'}, inplace=True)
-        
-        close_series = df['fechamento']
-        if len(close_series.shape) > 1:
-            close_series = close_series.iloc[:, 0]
-
-        # RSI
-        delta = close_series.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss.replace(0, 0.001)
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
-        # Média 50
-        df['sma_50'] = close_series.rolling(window=50).mean()
-        
-        return df.dropna()
-    except:
-        return None
-
+# --- No bloco de exibição (dentro do if btn_analisar) ---
+if fund:
+    st.subheader("🏥 Saúde da Empresa (Fundamentalista)")
+    f1, f2, f3 = st.columns(3)
+    f1.metric("P/L", f"{fund['pl']:.1f}" if fund['pl'] > 0 else "N/A")
+    f2.metric("Div. Yield", f"{fund['dy']:.2f}%" if fund['dy'] > 0 else "N/A")
+    f3.metric("Margem", f"{fund['margem']:.1f}%" if fund['margem'] > 0 else "N/A")
+else:
+    st.info("ℹ️ Dados fundamentalistas (P/L, DY) temporariamente indisponíveis no Yahoo. Foco na Análise Técnica abaixo.")
 # ==========================================
 # 3. INTERFACE LATERAL
 # ==========================================
