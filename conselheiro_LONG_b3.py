@@ -90,13 +90,47 @@ if btn_analisar:
             preco_atual = float(atual['fechamento'])
             rsi_valor = float(atual['rsi'])
             
-            # CÁLCULO DE MÁXIMAS (RESTAURADO)
+            # CÁLCULO DE MÁXIMAS
             max_180d = float(df['maxima'].tail(180).max())
             max_90d = float(df['maxima'].tail(90).max())
 
-            # Métricas Superiores
+            # Métricas Superiores (Linha 102 corrigida aqui)
             col1, col2, col3 = st.columns(3)
             col1.metric("Preço Atual", f"R$ {preco_atual:.2f}")
             col2.metric("RSI (14d)", f"{rsi_valor:.1f}")
             dist_topo = ((max_180d - preco_atual) / max_180d) * 100
-            col3.metric("
+            col3.metric("Dist. do Topo", f"{dist_topo:.1f}%")
+
+            if POSSUO_ACAO and PRECO_COMPRA > 0:
+                st.subheader("💰 Minha Posição")
+                lucro_pct = ((preco_atual - PRECO_COMPRA) / PRECO_COMPRA) * 100
+                st.metric("Resultado Atual", f"{lucro_pct:.2f}%", delta=f"{lucro_pct:.2f}%")
+                st.divider()
+
+            # --- RADIOGRAFIA DO MERCADO ---
+            st.subheader("📊 Radiografia do Mercado")
+            r1, r2 = st.columns(2)
+            r1.info(f"**Máxima 90 dias:** R$ {max_90d:.2f}")
+            r2.info(f"**Máxima 180 dias:** R$ {max_180d:.2f}")
+            st.divider()
+
+            # Saúde Financeira
+            if fund:
+                st.subheader("🏥 Saúde da Empresa")
+                f1, f2, f3 = st.columns(3)
+                f1.metric("P/L", f"{fund['pl']:.1f}")
+                f2.metric("Div. Yield", f"{fund['dy']:.1f}%")
+                f3.metric("Margem", f"{fund['margem']:.1f}%")
+                st.divider()
+
+            # Gestão de Risco
+            st.subheader("🛡️ Gestão de Risco")
+            v_stop = preco_atual * (1 - STOP_LOSS_PCT)
+            alvo_sug = ALVO_ANALISTA if ALVO_ANALISTA > 0 else (preco_atual * 1.15)
+            
+            g1, g2 = st.columns(2)
+            g1.error(f"Stop Loss Sugerido: R$ {v_stop:.2f}")
+            g2.success(f"Alvo Estratégico: R$ {alvo_sug:.2f}")
+
+        else:
+            st.error("Erro ao carregar dados. Verifique o ticker (ex: PETR4.SA).")
