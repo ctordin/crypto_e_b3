@@ -9,46 +9,48 @@ warnings.filterwarnings('ignore')
 st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout="centered")
 
 # 2. Funções de Busca
-@st.cache_data(ttl=3600)
-def buscar_fundamentos(ticker):
-    try:
-        acao = yf.Ticker(ticker)
-        inf = acao.info
-        if not inf or len(inf) < 5: return None
-        return {
-            "pl": inf.get('forwardPE') or inf.get('trailingPE') or 0,
-            "dy": (inf.get('dividendYield') or 0) * 100,
-            "margem": (inf.get('profitMargins') or 0) * 100
-        }
-    except: return None
-
 @st.cache_data(ttl=300)
 def buscar_dados_mercado(ticker):
     try:
         # Busca 250 dias para garantir o cálculo de 180 dias úteis
         df = yf.download(ticker, period='250d', interval='1d', progress=False, auto_adjust=True)
-        if df.empty: return None
         
-        # TRATAMENTO DE COLUNAS (Essencial para B3)
+        if df.empty: 
+            return None
+        
+        # --- AJUSTE PARA SMTO3: Limpeza de colunas MultiIndex ---
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
+        # Garante que as colunas sejam tratadas como Series simples
+        df = df.copy()
         df = df.reset_index()
-        # Padronização de nomes
-        df.rename(columns={'Close': 'fechamento', 'Date': 'data', 'High': 'maxima', 'Volume': 'volume'}, inplace=True)
         
-        # Cálculo RSI (14 períodos)
-        delta = df['fechamento'].diff()
+        # Mapeamento robusto de nomes
+        col_map = {
+            'Close': 'fechamento', 
+            'Date': 'data', 
+            'High': 'maxima', 
+            'Volume': 'volume'
+        }
+        df.rename(columns=col_map, inplace=True)
+        
+        # Cálculo RSI (14 períodos) com proteção contra Series duplicadas
+        close_series = df['fechamento'].iloc[:, 0] if len(df['fechamento'].shape) > 1 else df['fechamento']
+        
+        delta = close_series.diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss.replace(0, 0.001)
         df['rsi'] = 100 - (100 / (1 + rs))
         
-        # Média Móvel para tendência
-        df['sma_50'] = df['fechamento'].rolling(window=50).mean()
+        # Média Móvel
+        df['sma_50'] = close_series.rolling(window=50).mean()
         
         return df.dropna()
-    except: return None
+    except Exception as e:
+        print(f"Erro técnico: {e}")
+        return None
 
 # 3. Interface Lateral
 with st.sidebar:
