@@ -6,56 +6,47 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # 1. Configuração da Página
-st.set_page_config(page_title="Radar B3 - Lista Expandida", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="Radar B3 - Visão Geral", page_icon="🎯", layout="wide")
 
 # ==========================================
-# 2. FUNÇÕES DE SUPORTE
+# 2. FUNÇÃO DE BUSCA TÉCNICA
 # ==========================================
-
-@st.cache_data(ttl=3600)
-def checar_fundamentos(ticker_nome):
-    try:
-        ticker_obj = yf.Ticker(ticker_nome)
-        inf = ticker_obj.info
-        if not inf or len(inf) < 10:
-            return False, "Dados indisponíveis (Yahoo Limit)"
-        
-        pl = inf.get('forwardPE') or inf.get('trailingPE') or 0.0
-        dy = (inf.get('dividendYield') or 0.0) * 100
-        margem = (inf.get('profitMargins') or 0.0) * 100
-        
-        saudavel = (pl > 0 and margem > 10)
-        status_texto = f"P/L: {pl:.1f} | DY: {dy:.1f}% | Margem: {margem:.1f}%"
-        return saudavel, status_texto
-    except:
-        return False, "Indisponível no momento"
 
 @st.cache_data(ttl=300)
-def buscar_dados_tecnicos(ticker):
+def buscar_dados_completos(ticker):
     try:
         t_yf = ticker if ".SA" in ticker.upper() else f"{ticker.upper()}.SA"
         df = yf.download(t_yf, period='250d', interval='1d', progress=False, auto_adjust=True)
+        
         if df is None or df.empty: return None
+        
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
+        
         df = df.copy().reset_index()
         df.rename(columns={'Close': 'fechamento', 'Date': 'data'}, inplace=True)
+        
         close_series = df['fechamento']
         if len(close_series.shape) > 1: close_series = close_series.iloc[:, 0]
+        
+        # Indicadores para a recomendação
         df['sma_50'] = close_series.rolling(window=50).mean()
+        
         delta = close_series.diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss.replace(0, 0.001)
         df['rsi'] = 100 - (100 / (1 + rs))
+        
         return df.dropna()
     except:
         return None
 
 # ==========================================
-# 3. INTERFACE E LISTA AMPLIADA
+# 3. INTERFACE E PROCESSAMENTO
 # ==========================================
-st.title("🎯 Radar B3: Varredura de Mercado")
+st.title("🎯 Radar B3: Painel de Monitoramento")
+st.markdown("Lista completa de ativos com análise técnica em tempo real.")
 
 ACOES_MONITORADAS = [
     'ALOS3.SA', 'SMTO3.SA', 'VALE3.SA', 'PETR4.SA', 'ITUB4.SA', 
@@ -65,44 +56,46 @@ ACOES_MONITORADAS = [
     'CSNA3.SA', 'PRIO3.SA', 'VBBR3.SA', 'RADL3.SA', 'LREN3.SA'
 ]
 
-if st.button("🚀 INICIAR VARREDURA COMPLETA", use_container_width=True):
-    oportunidades = []
+if st.button("🚀 ATUALIZAR TODOS OS ATIVOS", use_container_width=True):
+    painel_geral = []
     barra_progresso = st.progress(0)
-    status_acao = st.empty()
     
     for idx, ticker in enumerate(ACOES_MONITORADAS):
         barra_progresso.progress((idx + 1) / len(ACOES_MONITORADAS))
-        status_acao.caption(f"Analisando: {ticker}...")
         
-        df_tec = buscar_dados_tecnicos(ticker)
+        df = buscar_dados_completos(ticker)
         
-        if df_tec is not None:
-            atual = df_tec.iloc[-1]
+        if df is not None:
+            atual = df.iloc[-1]
             p_atual = float(atual['fechamento'])
-            m50 = float(atual['sma_50'])
             rsi_val = float(atual['rsi'])
+            m50 = float(atual['sma_50'])
             
+            # Lógica de Recomendação
             if p_atual > m50 and rsi_val < 55:
-                is_saudavel, texto_fund = checar_fundamentos(ticker)
+                rec = "🟢 COMPRA ESTRATÉGICA"
+            elif rsi_val > 70:
+                rec = "🟡 SOBRECOMPRADO (Aguardar)"
+            elif p_atual < m50:
+                rec = "🔴 TENDÊNCIA DE BAIXA"
+            else:
+                rec = "⚪ NEUTRO"
                 
-                oportunidades.append({
-                    "Ativo": ticker,
-                    "Preço Atual": f"R$ {p_atual:.2f}",
-                    "RSI (14d)": f"{rsi_val:.1f}",
-                    "Saúde": "✅ Saudável" if is_saudavel else "⚠️ Alerta",
-                    "Indicadores": texto_fund
-                })
-    
+            painel_geral.append({
+                "Ativo": ticker,
+                "Preço": f"R$ {p_atual:.2f}",
+                "RSI (14d)": f"{rsi_val:.1f}",
+                "Recomendação Técnica": rec
+            })
+            
     barra_progresso.empty()
-    status_acao.empty()
     
-    if oportunidades:
-        st.success(f"Foram encontradas {len(oportunidades)} ações no ponto de compra!")
-        df_final = pd.DataFrame(oportunidades)
-        # Tabela formatada conforme a documentação enviada
+    if painel_geral:
+        df_final = pd.DataFrame(painel_geral)
+        # Exibindo a tabela completa conforme as novas regras de layout
         st.table(df_final)
     else:
-        st.info("Nenhuma das 25 ações preenche os critérios no momento.")
+        st.error("Erro ao conectar com o Yahoo Finance. Tente novamente em instantes.")
 
 st.divider()
-st.caption("Filtros: Preço > M50 e RSI < 55.")
+st.caption("Filtro de Compra: Preço acima da Média de 50 e RSI abaixo de 55.")
