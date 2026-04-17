@@ -23,52 +23,25 @@ LISTA_ACOES = [
 # ==========================================
 # 2. MOTOR DE ANÁLISE (TÉCNICO + FUNDAMENTOS)
 # ==========================================
-@st.cache_data(ttl=3600) # Dados fundamentalistas mudam pouco, cache de 1h
-def checar_fundamentos(ticker):
+@st.cache_data(ttl=3600)
+def buscar_fundamentos_estavel(ticker_raw):
+    """Busca fundamentos no Fundamentus para evitar erros de IP no Yahoo"""
     try:
-        acao = yf.Ticker(ticker)
-        info = acao.info
+        # Limpa o ticker (remove .SA) para o padrão brasileiro
+        t_limpo = ticker_raw.replace(".SA", "").strip().upper()
         
-        # Filtros de Qualidade para Swing Trade
-        pe_ratio = info.get('forwardPE') or info.get('trailingPE') or 0
-        dy = (info.get('dividendYield') or 0) * 100
-        margem = info.get('profitMargins') or 0
+        import fundamentus
+        df_f = fundamentus.get_papel(t_limpo)
         
-        # Critério: P/L abaixo de 25 e Margem Líquida positiva (>5%)
-        # Isso remove empresas "bolhas" ou em prejuízo crônico
-        is_saudavel = 0 < pe_ratio < 25 and margem > 0.05
-        
-        status_fund = f"P/L: {pe_ratio:.1f} | DY: {dy:.1f}% | Margem: {margem*100:.1f}%"
-        return is_saudavel, status_fund
-    except:
-        return True, "Fundamentos: N/A (Erro na consulta)"
-
-@st.cache_data(ttl=300)
-def obter_dados_graficos(ticker):
-    try:
-        df = yf.download(ticker, period='150d', interval='1d', progress=False)
-        if df.empty or len(df) < 50: return None
-        
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [col[0] for col in df.columns]
-        
-        df = df.reset_index()
-        fechamento = 'Adj Close' if 'Adj Close' in df.columns else 'Close'
-        df.rename(columns={fechamento: 'fechamento', 'Date': 'data'}, inplace=True)
-        
-        # Indicadores
-        df['ema_9'] = df['fechamento'].ewm(span=9, adjust=False).mean()
-        df['sma_50'] = df['fechamento'].rolling(window=50).mean()
-        
-        delta = df['fechamento'].diff()
-        ganho = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        perda = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        df['rsi'] = 100 - (100 / (1 + (ganho/perda)))
-        
-        return df.dropna()
-    except:
+        if df_f is not None and not df_f.empty:
+            return {
+                "pl": float(df_f['pl'].iloc[0]) / 100,
+                "dy": float(df_f['dy'].iloc[0]) / 100,
+                "margem": float(df_f['mrg_liq'].iloc[0]) / 100
+            }
+    except Exception:
+        # Se falhar, o app continua funcionando apenas com a técnica
         return None
-
 # ==========================================
 # 3. INTERFACE E EXECUÇÃO
 # ==========================================
