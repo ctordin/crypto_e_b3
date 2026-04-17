@@ -29,6 +29,8 @@ PORTFOLIO = {
     'POL/USDT': 'POL-USD',
     'ENJ/USDT': 'ENJ-USD',
     'XAUT/USDT': 'XAUT-USD',
+    'ORDI/USDT': 'ORDI-USD',
+    'BASED/USDT': 'BASED-USD',
     'TSM': 'TSM' # Alterado para o Radar entender que é Especial
 }
 
