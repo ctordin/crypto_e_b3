@@ -29,7 +29,7 @@ def buscar_dados_completos(ticker):
         close_series = df['fechamento']
         if len(close_series.shape) > 1: close_series = close_series.iloc[:, 0]
         
-        # Indicadores para a recomendação
+        # Cálculo dos indicadores
         df['sma_50'] = close_series.rolling(window=50).mean()
         
         delta = close_series.diff()
@@ -46,7 +46,7 @@ def buscar_dados_completos(ticker):
 # 3. INTERFACE E PROCESSAMENTO
 # ==========================================
 st.title("🎯 Radar B3: Painel de Monitoramento")
-st.markdown("Lista completa de ativos com análise técnica em tempo real.")
+st.markdown("Lista completa com foco em **Tendência (M50)** e **Momento (RSI)**.")
 
 ACOES_MONITORADAS = [
     'ALOS3.SA', 'SMTO3.SA', 'VALE3.SA', 'PETR4.SA', 'ITUB4.SA', 
@@ -71,31 +71,40 @@ if st.button("🚀 ATUALIZAR TODOS OS ATIVOS", use_container_width=True):
             rsi_val = float(atual['rsi'])
             m50 = float(atual['sma_50'])
             
-            # Lógica de Recomendação
+            # Parecer sobre a Média de 50
+            if p_atual > m50:
+                dist_m50 = ((p_atual - m50) / m50) * 100
+                status_m50 = f"⬆️ ALTA (+{dist_m50:.1f}%)"
+            else:
+                dist_m50 = ((m50 - p_atual) / m50) * 100
+                status_m50 = f"⬇️ BAIXA (-{dist_m50:.1f}%)"
+
+            # Lógica de Recomendação Técnica
             if p_atual > m50 and rsi_val < 55:
                 rec = "🟢 COMPRA ESTRATÉGICA"
             elif rsi_val > 70:
-                rec = "🟡 SOBRECOMPRADO (Aguardar)"
+                rec = "🟡 ESTICADO (Aguardar)"
             elif p_atual < m50:
-                rec = "🔴 TENDÊNCIA DE BAIXA"
+                rec = "🔴 FORA (Tendência Baixa)"
             else:
                 rec = "⚪ NEUTRO"
                 
             painel_geral.append({
                 "Ativo": ticker,
                 "Preço": f"R$ {p_atual:.2f}",
+                "Parecer M50": status_m50,
                 "RSI (14d)": f"{rsi_val:.1f}",
-                "Recomendação Técnica": rec
+                "Recomendação": rec
             })
             
     barra_progresso.empty()
     
     if painel_geral:
         df_final = pd.DataFrame(painel_geral)
-        # Exibindo a tabela completa conforme as novas regras de layout
+        # Exibição usando o st.table com bordas horizontais conforme a doc
         st.table(df_final)
     else:
-        st.error("Erro ao conectar com o Yahoo Finance. Tente novamente em instantes.")
+        st.error("Erro ao carregar dados. Tente novamente.")
 
 st.divider()
-st.caption("Filtro de Compra: Preço acima da Média de 50 e RSI abaixo de 55.")
+st.info("**Legenda M50:** Indica se o preço está acima ou abaixo da média de 50 dias e a distância percentual.")
