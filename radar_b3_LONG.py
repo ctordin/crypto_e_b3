@@ -108,6 +108,13 @@ if st.button("🚀 INICIAR VARREDURA COMPLETA", use_container_width=True):
     barra_progresso.empty()
     status_acao.empty()
     
-    if oportunidades:
+   if oportunidades:
         st.success(f"Foram encontradas {len(oportunidades)} ações no ponto de compra!")
-        st.table
+        
+        # Transformando em DataFrame para formatar
+        df_final = pd.DataFrame(oportunidades)
+        
+        # Exibindo com bordas horizontais e largura total conforme a documentação
+        st.table(df_final, border="horizontal", width="stretch")
+    else:
+        st.info("Nenhuma das 25 ações preenche os critérios no momento.")
