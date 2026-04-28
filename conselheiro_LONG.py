@@ -1,35 +1,53 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import requests
 
 # Configuração da página
 st.set_page_config(page_title="Conselheiro Pro: B3 & Crypto", layout="wide")
 
-def buscar_dados_hibrido(ticker, dias=180):
-    ticker = ticker.upper().strip()
+def buscar_coingecko_backup(ticker):
+    """Função de escape caso o Yahoo Finance falhe (especial para ZBT)"""
+    mapa_ids = {"ZBT": "zerobase", "ZBT1": "zerobase"}
+    coin_id = mapa_ids.get(ticker.upper(), ticker.lower())
+    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
+    params = {'vs_currency': 'usd', 'days': '180', 'interval': 'daily'}
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        data = response.json()
+        df = pd.DataFrame(data['prices'], columns=['timestamp', 'Close'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        return df
+    except:
+        return None
+
+def buscar_dados_perfeitos(ticker, dias=180):
+    original_ticker = ticker.upper().strip()
     
-    # REGRA ESPECIAL PARA ZBT (Ticker problemático no Yahoo)
-    if ticker == "ZBT":
-        ticker = "ZBT1-USD"
-    
-    # REGRA PARA OUTRAS CRIPTOS (SOL, DOGE, AVAX...)
-    elif "-" not in ticker and "." not in ticker:
-        if not any(char.isdigit() for char in ticker):
-            ticker = f"{ticker}-USD"
+    # 1. Tenta formatar para o Yahoo Finance (Padrão para SOL, DOGE, PETR4)
+    y_ticker = original_ticker
+    if "-" not in y_ticker and "." not in y_ticker:
+        if not any(char.isdigit() for char in y_ticker):
+            y_ticker = f"{y_ticker}-USD"
         else:
-            # REGRA PARA B3 (PETR4, ALOS3...)
-            ticker = f"{ticker}.SA"
+            y_ticker = f"{y_ticker}.SA"
             
     try:
-        # Busca principal via Yahoo Finance (Mais estável)
-        data = yf.download(ticker, period=f"{dias}d", interval="1d", progress=False, auto_adjust=True)
-        if data.empty:
-            return None, ticker
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
-        return data, ticker
+        data = yf.download(y_ticker, period=f"{dias}d", interval="1d", progress=False, auto_adjust=True)
+        if not data.empty:
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = data.columns.get_level_values(0)
+            return data, y_ticker
     except:
-        return None, ticker
+        pass
+    
+    # 2. Se o Yahoo falhar, tenta o Backup via CoinGecko (Essencial para ZBT)
+    data_backup = buscar_coingecko_backup(original_ticker)
+    if data_backup is not None:
+        return data_backup, f"{original_ticker} (via CoinGecko)"
+    
+    return None, original_ticker
 
 def calcular_rsi(data, window=14):
     close = data['Close']
@@ -42,39 +60,31 @@ def calcular_rsi(data, window=14):
 # --- Interface Lateral ---
 st.sidebar.header("⚙️ Configurações")
 ticker_input = st.sidebar.text_input("Ativo (ZBT, SOL, PETR4...)", "ZBT")
-
-st.sidebar.divider()
-ja_possui = st.sidebar.checkbox("Já possuo este ativo?", value=False)
-preco_compra = st.sidebar.number_input("Meu Preço de Compra", format="%.4f", value=0.0)
 btn_confirmar = st.sidebar.button("🚀 ATUALIZAR CONSELHEIRO")
 
 # --- Lógica Principal ---
-st.title("🚀 Conselheiro Pro: Versão Híbrida")
-st.divider()
+st.title("🚀 Conselheiro Pro: Inteligência Híbrida")
 
 if btn_confirmar:
-    with st.spinner(f'Buscando {ticker_input}...'):
-        df, ticker_final = buscar_dados_hibrido(ticker_input)
+    with st.spinner(f'Analisando {ticker_input}...'):
+        df, fonte = buscar_dados_perfeitos(ticker_input)
     
     if df is not None:
-        # Preço e SMA 50 (Sua preferência)
         preco_atual = float(df['Close'].iloc[-1])
-        df['SMA50'] = df['Close'].rolling(window=50).mean()
+        df['SMA50'] = df['Close'].rolling(window=50).mean() # SMA 50 configurada
         sma50_atual = float(df['SMA50'].iloc[-1])
         rsi_valor = float(calcular_rsi(df))
         
-        # Dashboard
         col1, col2, col3 = st.columns(3)
-        col1.metric(f"Preço Atual", f"$ {preco_atual:.4f}" if "-USD" in ticker_final else f"R$ {preco_atual:.2f}")
+        col1.metric("Preço Atual", f"$ {preco_atual:.4f}")
         col2.metric("SMA 50", f"{sma50_atual:.4f}")
         col3.metric("RSI (14d)", f"{rsi_valor:.1f}")
 
-        # Análise de Tendência SMA 50
         if preco_atual > sma50_atual:
-            st.success(f"📈 **Tendência de Alta:** Acima da SMA 50.")
+            st.success(f"📈 **Tendência de Alta:** Preço acima da SMA 50.")
         else:
-            st.error(f"📉 **Tendência de Baixa:** Abaixo da SMA 50.")
+            st.error(f"📉 **Tendência de Baixa:** Preço abaixo da SMA 50.")
             
-        st.caption(f"Dados processados via: {ticker_final}")
+        st.caption(f"Fonte de dados: {fonte}")
     else:
-        st.error(f"Não foi possível encontrar dados para '{ticker_input}'.")
+        st.error(f"Erro: O ativo '{ticker_input}' não foi encontrado em nenhuma base.")
