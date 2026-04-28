@@ -6,17 +6,22 @@ import pandas as pd
 st.set_page_config(page_title="Conselheiro Pro Advisor", layout="wide")
 
 def buscar_dados(ticker, dias=180):
-    # Lógica para facilitar a digitação do usuário
-    ticker = ticker.upper()
-    # Se não tem hífen nem ponto, tenta identificar se é B3 ou Crypto
-    if "-" not in ticker and "." not in ticker:
-        if any(char.isdigit() for char in ticker): # Ex: PETR4 -> PETR4.SA
+    ticker = ticker.upper().strip()
+    
+    # Tratamento específico para o ZBT
+    if ticker == "ZBT" or ticker == "ZBT1":
+        ticker = "ZBT1-USD"
+    
+    # Regra geral para outros ativos
+    elif "-" not in ticker and "." not in ticker:
+        if any(char.isdigit() for char in ticker):
             ticker = f"{ticker}.SA"
-        else: # Ex: ZBT -> ZBT-USD
+        else:
             ticker = f"{ticker}-USD"
             
     try:
-        data = yf.download(ticker, period=f"{dias}d", interval="1d", progress=False, auto_adjust=True)
+        # Adicionado o parâmetro 'threads=False' para maior estabilidade no Streamlit
+        data = yf.download(ticker, period=f"{dias}d", interval="1d", progress=False, auto_adjust=True, threads=False)
         if data.empty:
             return None, ticker
         if isinstance(data.columns, pd.MultiIndex):
