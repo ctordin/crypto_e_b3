@@ -4,16 +4,17 @@ import pandas as pd
 import requests
 
 # Configuração da página
-st.set_page_config(page_title="Conselheiro Pro: B3 & Crypto", layout="wide")
+st.set_page_config(page_title="Conselheiro Pro: Híbrido", layout="wide")
 
-def buscar_coingecko_backup(ticker):
-    """Função de escape caso o Yahoo Finance falhe (especial para ZBT)"""
-    mapa_ids = {"ZBT": "zerobase", "ZBT1": "zerobase"}
-    coin_id = mapa_ids.get(ticker.upper(), ticker.lower())
+def resgate_coingecko(ticker):
+    """Busca o ID correto e os dados se o Yahoo falhar"""
+    ticker_map = {"ZBT": "zerobase", "ZBT1": "zerobase"}
+    coin_id = ticker_map.get(ticker.upper(), ticker.lower())
+    
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
     params = {'vs_currency': 'usd', 'days': '180', 'interval': 'daily'}
     try:
-        response = requests.get(url, params=params, timeout=5)
+        response = requests.get(url, params=params, timeout=10)
         data = response.json()
         df = pd.DataFrame(data['prices'], columns=['timestamp', 'Close'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
@@ -23,10 +24,10 @@ def buscar_coingecko_backup(ticker):
         return None
 
 def buscar_dados_perfeitos(ticker, dias=180):
-    original_ticker = ticker.upper().strip()
+    original = ticker.upper().strip()
     
-    # 1. Tenta formatar para o Yahoo Finance (Padrão para SOL, DOGE, PETR4)
-    y_ticker = original_ticker
+    # 1. Formatação para Yahoo (SOL, DOGE, PETR4)
+    y_ticker = original
     if "-" not in y_ticker and "." not in y_ticker:
         if not any(char.isdigit() for char in y_ticker):
             y_ticker = f"{y_ticker}-USD"
@@ -38,16 +39,16 @@ def buscar_dados_perfeitos(ticker, dias=180):
         if not data.empty:
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = data.columns.get_level_values(0)
-            return data, y_ticker
+            return data, f"Yahoo ({y_ticker})"
     except:
         pass
     
-    # 2. Se o Yahoo falhar, tenta o Backup via CoinGecko (Essencial para ZBT)
-    data_backup = buscar_coingecko_backup(original_ticker)
-    if data_backup is not None:
-        return data_backup, f"{original_ticker} (via CoinGecko)"
+    # 2. Resgate automático para ZBT ou falhas do Yahoo
+    data_resgate = resgate_coingecko(original)
+    if data_resgate is not None:
+        return data_resgate, f"CoinGecko ({original})"
     
-    return None, original_ticker
+    return None, original
 
 def calcular_rsi(data, window=14):
     close = data['Close']
@@ -63,15 +64,16 @@ ticker_input = st.sidebar.text_input("Ativo (ZBT, SOL, PETR4...)", "ZBT")
 btn_confirmar = st.sidebar.button("🚀 ATUALIZAR CONSELHEIRO")
 
 # --- Lógica Principal ---
-st.title("🚀 Conselheiro Pro: Inteligência Híbrida")
+st.title("🚀 Conselheiro Pro: B3 & Crypto")
 
 if btn_confirmar:
-    with st.spinner(f'Analisando {ticker_input}...'):
+    with st.spinner(f'Consultando bases de dados para {ticker_input}...'):
         df, fonte = buscar_dados_perfeitos(ticker_input)
     
     if df is not None:
         preco_atual = float(df['Close'].iloc[-1])
-        df['SMA50'] = df['Close'].rolling(window=50).mean() # SMA 50 configurada
+        # SMA 50 (Sua preferência configurada)
+        df['SMA50'] = df['Close'].rolling(window=50).mean()
         sma50_atual = float(df['SMA50'].iloc[-1])
         rsi_valor = float(calcular_rsi(df))
         
@@ -80,11 +82,12 @@ if btn_confirmar:
         col2.metric("SMA 50", f"{sma50_atual:.4f}")
         col3.metric("RSI (14d)", f"{rsi_valor:.1f}")
 
+        # Análise de Tendência SMA 50
         if preco_atual > sma50_atual:
-            st.success(f"📈 **Tendência de Alta:** Preço acima da SMA 50.")
+            st.success(f"📈 **Tendência de Alta:** Acima da SMA 50.")
         else:
-            st.error(f"📉 **Tendência de Baixa:** Preço abaixo da SMA 50.")
+            st.error(f"📉 **Tendência de Baixa:** Abaixo da SMA 50.")
             
-        st.caption(f"Fonte de dados: {fonte}")
+        st.caption(f"Fonte utilizada: {fonte}")
     else:
-        st.error(f"Erro: O ativo '{ticker_input}' não foi encontrado em nenhuma base.")
+        st.error(f"Não foi possível encontrar dados para '{ticker_input}'.")
