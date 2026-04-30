@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 
 # Configuração da página
-st.set_page_config(page_title="Conselheiro Pro: Gestor de Posição V6", layout="wide")
+st.set_page_config(page_title="Conselheiro Pro: Gestor de Posição V6.1", layout="wide")
 
 def resgate_coingecko(ticker):
     ticker_map = {"ZBT": "zerobase", "ZBT1": "zerobase", "RLS": "reals-network", "LINK": "chainlink", "ENJ": "enjincoin"}
@@ -56,14 +56,14 @@ def calcular_rsi(data, window=14):
 
 # --- Interface Lateral ---
 st.sidebar.header("⚙️ Parâmetros de Entrada")
-ticker_input = st.sidebar.text_input("Ativo (ZBT, SOL, LINK, ENJ)", "LINK")
+ticker_input = st.sidebar.text_input("Ativo (ZBT, SOL, LINK, ENJ)", "ENJ")
 stop_loss_input = st.sidebar.number_input("Stop Loss desejado (%)", value=5.0)
 
 st.sidebar.divider()
 btn_analisar = st.sidebar.button("🚀 ANALISAR AGORA")
 
 # --- Lógica Principal ---
-st.title("🏢 Conselheiro Pro: Gestor de Posição V6")
+st.title("🏢 Conselheiro Pro: Gestor de Posição V6.1")
 st.divider()
 
 if btn_analisar:
@@ -74,10 +74,13 @@ if btn_analisar:
         preco_atual = float(df['Close'].iloc[-1])
         rsi_valor = float(calcular_rsi(df))
         
-        # Lógica de Volume
+        # --- Lógica de Volume e Gatilho ---
         vol_atual = float(df['Volume'].iloc[-1])
         vol_med_20d = float(df['Volume'].rolling(window=20).mean().iloc[-1])
-        status_vol = "Alto" if vol_atual > (vol_med_20d * 1.5) else "Baixo" if vol_atual < (vol_med_20d * 0.9) else "Normal"
+        # O gatilho para sair de "Baixo" é 90% da média de 20 dias
+        vol_gatilho_verde = vol_med_20d * 0.9 
+        
+        status_vol = "Alto" if vol_atual > (vol_med_20d * 1.5) else "Baixo" if vol_atual < vol_gatilho_verde else "Normal"
 
         # SMA 50 e Inclinação
         df['SMA50'] = df['Close'].rolling(window=50).mean()
@@ -96,12 +99,16 @@ if btn_analisar:
         simbolo = "$" if "-USD" in fonte or "CoinGecko" in fonte else "R$"
         col_m1.metric("Preço Atual", f"{simbolo} {preco_atual:.4f}")
         col_m2.metric("RSI (14d)", f"{rsi_valor:.1f}")
-        col_m3.metric("Volume", status_vol)
+        col_m3.metric("Volume Atual", f"{status_vol}")
         col_m4.metric("SMA 50", f"{sma50_at:.4f}")
         
         st.divider()
         
-        # --- FILTRO DE ENTRADA V6 ---
+        # --- NOVO PAINEL DE GATILHO DE VOLUME ---
+        if status_vol == "Baixo":
+            st.info(f"💡 **DICA DE VOLUME:** Para o sinal mudar para VERDE, o volume nas próximas 24h precisa cruzar a marca de **{vol_gatilho_verde:,.0f}**. (Acompanhe no TradingView)")
+        
+        # --- FILTRO DE ENTRADA V6.1 ---
         st.subheader("🛡️ Verificação de Entrada e Tendência")
         
         if preco_atual > sma50_at:
@@ -111,23 +118,21 @@ if btn_analisar:
                 else:
                     st.warning(f"⚠️ **ALERTA:** Alta confirmada, mas RSI ({rsi_valor:.1f}) indica sobrecompra.")
             elif status_vol == "Baixo":
-                st.info(f"🟡 **AGUARDAR (Volume Baixo):** O preço está acima da média, mas não há força compradora. Risco de queda.")
+                st.info(f"🟡 **AGUARDAR (Volume Baixo):** Preço acima da média, mas sem força. Falta volume comprador.")
             elif distancia_media <= 1.0:
-                # Corrigido conflito de aspas
-                st.info(f'🟡 **NEUTRO (Margem Curta):** O preço está "colado" na SMA 50 ({distancia_media:.2f}%). Sem margem de segurança.')
+                st.info(f'🟡 **NEUTRO (Margem Curta):** Preço "colado" na SMA 50. Sem margem de segurança.')
             else:
                 st.info(f"🟡 **NEUTRO:** A SMA 50 perdeu inclinação positiva.")
         else:
             st.error(f"🔴 **TENDÊNCIA DE BAIXA:** Preço abaixo da SMA 50. Proteja seu capital.")
 
         if max_90_180 > max_0_90 * 1.2:
-            st.warning(f"🚩 **CICLO DE QUEDA:** O pico de 180 dias é muito superior ao recente. O ativo está em tendência macro de baixa.")
+            st.warning(f"🚩 **CICLO DE QUEDA:** O pico de 180 dias é muito superior ao recente. Ativo em tendência macro de baixa.")
             
         st.divider()
         
-        # --- CICLOS DE RESISTÊNCIA COM UPSIDE COMPLETO ---
+        # Ciclos de Resistência
         st.subheader("📊 Ciclos de Resistência e Risco")
-        
         up_recente = ((max_0_90 - preco_atual) / preco_atual) * 100
         up_antigo = ((max_90_180 - preco_atual) / preco_atual) * 100
         
@@ -137,6 +142,6 @@ if btn_analisar:
         
         valor_stop = preco_atual * (1 - (stop_loss_input / 100))
         st.error(f"Stop Loss Sugerido: {simbolo} {valor_stop:.4f}")
-        st.caption(f"Análise via: {fonte}")
+        st.caption(f"Análise via: {fonte} | Volume Médio 20d: {vol_med_20d:,.0f}")
     else:
         st.error(f"Erro: Ativo '{ticker_input}' não encontrado.")
