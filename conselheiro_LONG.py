@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 
 # Configuração da página
-st.set_page_config(page_title="Conselheiro Pro: Gestor V6", layout="wide")
+st.set_page_config(page_title="Conselheiro Pro: Gestor de Posição V6", layout="wide")
 
 def resgate_coingecko(ticker):
     ticker_map = {"ZBT": "zerobase", "ZBT1": "zerobase", "RLS": "reals-network", "LINK": "chainlink", "ENJ": "enjincoin"}
@@ -101,22 +101,19 @@ if btn_analisar:
         
         st.divider()
         
-        # --- FILTRO DE ENTRADA V6 (Cérebro do Robô) ---
+        # --- FILTRO DE ENTRADA V6 ---
         st.subheader("🛡️ Verificação de Entrada e Tendência")
         
         if preco_atual > sma50_at:
-            # Condição para o Verde: Média subindo + Volume não ser baixo + Margem > 1%
             if sma50_at > sma50_ant and status_vol != "Baixo" and distancia_media > 1.0:
                 if rsi_valor < 62:
-                    st.success(f"🟢 **SINAL VERDE:** Tendência de alta confirmada com volume e margem de segurança.")
+                    st.success(f"🟢 **SINAL VERDE:** Tendência de alta confirmada com volume e margem.")
                 else:
-                    st.warning(f"⚠️ **ALERTA:** Tendência de alta, mas ativo muito esticado (RSI: {rsi_valor:.1f}).")
-            
-            # Condição de Cuidado (Caso atual da LINK)
+                    st.warning(f"⚠️ **ALERTA:** Alta confirmada, mas RSI ({rsi_valor:.1f}) indica sobrecompra.")
             elif status_vol == "Baixo":
                 st.info(f"🟡 **AGUARDAR (Volume Baixo):** O preço está acima da média, mas não há força compradora. Risco de queda.")
             elif distancia_media <= 1.0:
-                # Corrigido: Usando aspas simples externamente para permitir aspas duplas em "colado"
+                # Corrigido conflito de aspas
                 st.info(f'🟡 **NEUTRO (Margem Curta):** O preço está "colado" na SMA 50 ({distancia_media:.2f}%). Sem margem de segurança.')
             else:
                 st.info(f"🟡 **NEUTRO:** A SMA 50 perdeu inclinação positiva.")
@@ -128,11 +125,15 @@ if btn_analisar:
             
         st.divider()
         
-        # Picos e Risco
+        # --- CICLOS DE RESISTÊNCIA COM UPSIDE COMPLETO ---
         st.subheader("📊 Ciclos de Resistência e Risco")
+        
+        up_recente = ((max_0_90 - preco_atual) / preco_atual) * 100
+        up_antigo = ((max_90_180 - preco_atual) / preco_atual) * 100
+        
         c_p1, c_p2 = st.columns(2)
-        c_p1.info(f"Pico 0-90 dias: {simbolo} {max_0_90:.4f} (Upside: {((max_0_90-preco_atual)/preco_atual)*100:.1f}%)")
-        c_p2.info(f"Pico 90-180 dias: {simbolo} {max_90_180:.4f}")
+        c_p1.info(f"Pico 0-90 dias: {simbolo} {max_0_90:.4f} (Upside: {up_recente:.1f}%)")
+        c_p2.info(f"Pico 90-180 dias: {simbolo} {max_90_180:.4f} (Upside: {up_antigo:.1f}%)")
         
         valor_stop = preco_atual * (1 - (stop_loss_input / 100))
         st.error(f"Stop Loss Sugerido: {simbolo} {valor_stop:.4f}")
