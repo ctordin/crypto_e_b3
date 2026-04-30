@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 
 # Configuração da página
-st.set_page_config(page_title="Conselheiro Pro: Gestor de Risco V3", layout="wide")
+st.set_page_config(page_title="Conselheiro Pro: Gestor de Risco V4", layout="wide")
 
 def resgate_coingecko(ticker):
     """Resgate para tokens que o Yahoo não encontra (ZBT, RLS, LINK)"""
@@ -64,7 +64,7 @@ st.sidebar.divider()
 btn_analisar = st.sidebar.button("🚀 ANALISAR AGORA")
 
 # --- Lógica Principal ---
-st.title("🏢 Conselheiro Pro: Gestor de Posição V3")
+st.title("🏢 Conselheiro Pro: Gestor de Posição V4")
 st.divider()
 
 if btn_analisar:
@@ -76,60 +76,64 @@ if btn_analisar:
         preco_atual = float(df['Close'].iloc[-1])
         rsi_valor = float(calcular_rsi(df))
         
-        # --- Lógica de Opinião sobre Volume ---
+        # Opinião sobre Volume
         volume_atual = float(df['Volume'].iloc[-1])
         volume_medio_20d = float(df['Volume'].rolling(window=20).mean().iloc[-1])
-        
-        if volume_atual > (volume_medio_20d * 1.5):
-            opiniao_volume = "Alto 📈"
-            cor_volume = "inverse" # Vermelho/Destaque
-        elif volume_atual < (volume_medio_20d * 0.8):
-            opiniao_volume = "Baixo 📉"
-            cor_volume = "normal"
-        else:
-            opiniao_volume = "Normal ↔️"
-            cor_volume = "normal"
+        opiniao_volume = "Alto 📈" if volume_atual > (volume_medio_20d * 1.5) else "Baixo 📉" if volume_atual < (volume_medio_20d * 0.8) else "Normal ↔️"
 
         # Média de 50 dias e Inclinação
         df['SMA50'] = df['Close'].rolling(window=50).mean()
         sma50_atual = float(df['SMA50'].iloc[-1])
         sma50_anterior = float(df['SMA50'].iloc[-3])
         
-        # --- DASHBOARD SUPERIOR (Agora com 4 Colunas) ---
+        # Estatísticas de Máximas (90 e 180 dias)
+        max_180d = float(df['High'].max())
+        df_90 = df.iloc[-90:] if len(df) >= 90 else df
+        max_90d = float(df_90['High'].max())
+        
+        # Dashboard Superior
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         simbolo = "$" if "-USD" in fonte or "CoinGecko" in fonte else "R$"
-        
         col_m1.metric("Preço Atual", f"{simbolo} {preco_atual:.4f}")
         col_m2.metric("RSI (14d)", f"{rsi_valor:.1f}")
-        col_m3.metric("Volume (24h)", opiniao_volume, delta=f"Vs. Méd. 20d", delta_color=cor_volume)
-        col_m4.metric("Média 50d", f"{sma50_atual:.4f}")
+        col_m3.metric("Volume (24h)", opiniao_volume)
+        col_m4.metric("SMA 50", f"{sma50_atual:.4f}")
         
         st.divider()
         
         # --- VERIFICAÇÃO DE ENTRADA ---
         st.subheader("🛡️ Verificação de Entrada e Tendência")
-        
         if preco_atual > sma50_atual:
             if sma50_atual > sma50_anterior:
                 if rsi_valor < 62:
                     st.success(f"🟢 **SINAL VERDE:** Tendência de alta forte. Preço acima da SMA 50 e RSI saudável.")
                 else:
-                    st.warning(f"⚠️ **ALERTA:** Tendência de alta, mas RSI ({rsi_valor:.1f}) indica sobrecompra. Aguarde correção.")
+                    st.warning(f"⚠️ **ALERTA:** Tendência de alta, mas RSI ({rsi_valor:.1f}) indica sobrecompra.")
             else:
-                st.info(f"🟡 **NEUTRO:** Preço acima da média, mas a SMA 50 perdeu inclinação. Perigo de exaustão.")
+                st.info(f"🟡 **NEUTRO:** Preço acima da média, mas a SMA 50 perdeu inclinação.")
         else:
             st.error(f"🔴 **TENDÊNCIA DE BAIXA:** Fique fora. Preço abaixo da SMA 50.")
             
         st.divider()
         
-        # --- GESTÃO DE RISCO ---
-        st.subheader("💔 Gestão de Saída")
+        # --- GESTÃO DE RISCO E ANÁLISE DE CICLO ---
+        st.subheader("📊 Análise de Recuperação e Ciclo")
+        
         valor_stop = preco_atual * (1 - (stop_loss_input / 100))
         alvo_sugerido = preco_atual * 1.20
         
         col_s1, col_s2 = st.columns(2)
         col_s1.error(f"Stop Loss Sugerido: {simbolo} {valor_stop:.4f}")
         col_s2.success(f"Alvo Sugerido (+20%): {simbolo} {alvo_sugerido:.4f}")
+        
+        # Cálculo de Potencial (Restauração da última linha)
+        upside_90d = ((max_90d - preco_atual) / preco_atual) * 100
+        upside_180d = ((max_180d - preco_atual) / preco_atual) * 100
+        
+        st.markdown(f"---")
+        st.markdown(f"📈 **Potencial de Retorno (Upside):**")
+        st.write(f"* Para atingir a máxima de **90 dias** ({simbolo} {max_90d:.4f}), o ativo precisa subir **{upside_90d:.1f}%**.")
+        st.write(f"* Para atingir a máxima de **180 dias** ({simbolo} {max_180d:.4f}), o ativo precisa subir **{upside_180d:.1f}%**.")
         
         st.caption(f"Análise baseada em dados de: {fonte}")
     else:
