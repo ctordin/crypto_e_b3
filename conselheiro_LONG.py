@@ -6,12 +6,21 @@ import requests
 st.set_page_config(page_title="Conselheiro Pro: Gestor V6.4", layout="wide")
 
 def resgate_coingecko(ticker):
-    ticker_map = {"ZBT": "zerobase", "ZBT1": "zerobase", "RLS": "reals-network", "LINK": "chainlink", "ENJ": "enjincoin", "ORDI": "ordinals"}
+    # Mapa atualizado com os novos tokens do seu painel OKX
+    ticker_map = {
+        "ZBT": "zerobase", 
+        "LINK": "chainlink", 
+        "ENJ": "enjincoin", 
+        "ORDI": "ordinals",
+        "BIO": "bio-protocol",  # ID provável para o BIO/USDT
+        "MEGA": "mega-token"    # ID provável para o MEGA/USDT
+    }
     coin_id = ticker_map.get(ticker.upper(), ticker.lower())
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
     params = {'vs_currency': 'usd', 'days': '180', 'interval': 'daily'}
     try:
         response = requests.get(url, params=params, timeout=10)
+        if response.status_code != 200: return None
         data = response.json()
         df = pd.DataFrame(data['prices'], columns=['timestamp', 'Close'])
         df['Volume'] = [v[1] for v in data['total_volumes']]
@@ -21,6 +30,11 @@ def resgate_coingecko(ticker):
         return df
     except:
         return None
+
+# Na parte da Lógica Principal (após o cálculo da SMA50):
+if len(df) < 50:
+    st.warning(f"⚠️ **DADOS INSUFICIENTES:** O ativo {ticker_input} é muito recente. O Conselheiro precisa de 50 dias de histórico para calcular a tendência.")
+    st.stop() # Interrompe a execução para não travar o painel
 
 def buscar_dados_perfeitos(ticker, dias=180):
     original = ticker.upper().strip()
