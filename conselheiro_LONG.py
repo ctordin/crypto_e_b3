@@ -116,7 +116,8 @@ if btn_analisar:
             elif status_vol == "Baixo":
                 st.info(f"🟡 **AGUARDAR (Volume Baixo):** O preço está acima da média, mas não há força compradora. Risco de queda.")
             elif distancia_media <= 1.0:
-                st.info(f"🟡 **NEUTRO (Margem Curta):** O preço está "colado" na SMA 50 ({distancia_media:.2f}%). Sem margem de segurança.")
+                # Corrigido: Usando aspas simples externamente para permitir aspas duplas em "colado"
+                st.info(f'🟡 **NEUTRO (Margem Curta):** O preço está "colado" na SMA 50 ({distancia_media:.2f}%). Sem margem de segurança.')
             else:
                 st.info(f"🟡 **NEUTRO:** A SMA 50 perdeu inclinação positiva.")
         else:
