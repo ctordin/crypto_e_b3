@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 
 # Configuração da página
-st.set_page_config(page_title="Conselheiro Pro: Gestor de Posição V6.1", layout="wide")
+st.set_page_config(page_title="Conselheiro Pro: Gestor V6.2", layout="wide")
 
 def resgate_coingecko(ticker):
     ticker_map = {"ZBT": "zerobase", "ZBT1": "zerobase", "RLS": "reals-network", "LINK": "chainlink", "ENJ": "enjincoin"}
@@ -59,11 +59,19 @@ st.sidebar.header("⚙️ Parâmetros de Entrada")
 ticker_input = st.sidebar.text_input("Ativo (ZBT, SOL, LINK, ENJ)", "ENJ")
 stop_loss_input = st.sidebar.number_input("Stop Loss desejado (%)", value=5.0)
 
+# Novo Parâmetro de Calibração de Volume
+ref_volume = st.sidebar.selectbox(
+    "Referência de Volume (Méd. Móvel)",
+    options=[1, 5, 20, 30],
+    index=1,
+    help="Escolha o período da média para comparar o volume atual. 1 para diário, 5 para semanal curto, 30 para mensal."
+)
+
 st.sidebar.divider()
 btn_analisar = st.sidebar.button("🚀 ANALISAR AGORA")
 
 # --- Lógica Principal ---
-st.title("🏢 Conselheiro Pro: Gestor de Posição V6.1")
+st.title("🏢 Conselheiro Pro: Gestor de Posição V6.2")
 st.divider()
 
 if btn_analisar:
@@ -74,13 +82,13 @@ if btn_analisar:
         preco_atual = float(df['Close'].iloc[-1])
         rsi_valor = float(calcular_rsi(df))
         
-        # --- Lógica de Volume e Gatilho ---
+        # --- Lógica de Volume Calibrada ---
         vol_atual = float(df['Volume'].iloc[-1])
-        vol_med_20d = float(df['Volume'].rolling(window=20).mean().iloc[-1])
-        # O gatilho para sair de "Baixo" é 90% da média de 20 dias
-        vol_gatilho_verde = vol_med_20d * 0.9 
+        vol_medio = float(df['Volume'].rolling(window=ref_volume).mean().iloc[-1])
         
-        status_vol = "Alto" if vol_atual > (vol_med_20d * 1.5) else "Baixo" if vol_atual < vol_gatilho_verde else "Normal"
+        # Gatilho: 90% da média escolhida
+        vol_gatilho = vol_medio * 0.9 
+        status_vol = "Alto" if vol_atual > (vol_medio * 1.5) else "Baixo" if vol_atual < vol_gatilho else "Normal"
 
         # SMA 50 e Inclinação
         df['SMA50'] = df['Close'].rolling(window=50).mean()
@@ -99,36 +107,33 @@ if btn_analisar:
         simbolo = "$" if "-USD" in fonte or "CoinGecko" in fonte else "R$"
         col_m1.metric("Preço Atual", f"{simbolo} {preco_atual:.4f}")
         col_m2.metric("RSI (14d)", f"{rsi_valor:.1f}")
-        col_m3.metric("Volume Atual", f"{status_vol}")
+        col_m3.metric(f"Vol. vs Méd.{ref_volume}d", f"{status_vol}")
         col_m4.metric("SMA 50", f"{sma50_at:.4f}")
         
         st.divider()
         
-        # --- NOVO PAINEL DE GATILHO DE VOLUME ---
+        # --- PAINEL DE GATILHO OKX ---
         if status_vol == "Baixo":
-            st.info(f"💡 **DICA DE VOLUME:** Para o sinal mudar para VERDE, o volume nas próximas 24h precisa cruzar a marca de **{vol_gatilho_verde:,.0f}**. (Acompanhe no TradingView)")
+            st.warning(f"📌 **GATILHO OKX:** O volume atual é baixo. Para o sinal ficar verde, o '24h Vol' na OKX deve ultrapassar **{vol_gatilho:,.0f}**.")
         
-        # --- FILTRO DE ENTRADA V6.1 ---
+        # --- FILTRO DE ENTRADA V6.2 ---
         st.subheader("🛡️ Verificação de Entrada e Tendência")
         
         if preco_atual > sma50_at:
             if sma50_at > sma50_ant and status_vol != "Baixo" and distancia_media > 1.0:
                 if rsi_valor < 62:
-                    st.success(f"🟢 **SINAL VERDE:** Tendência de alta confirmada com volume e margem.")
+                    st.success(f"🟢 **SINAL VERDE:** Tendência confirmada com volume ({status_vol}) e margem.")
                 else:
-                    st.warning(f"⚠️ **ALERTA:** Alta confirmada, mas RSI ({rsi_valor:.1f}) indica sobrecompra.")
+                    st.warning(f"⚠️ **ALERTA:** RSI ({rsi_valor:.1f}) indica sobrecompra.")
             elif status_vol == "Baixo":
-                st.info(f"🟡 **AGUARDAR (Volume Baixo):** Preço acima da média, mas sem força. Falta volume comprador.")
+                st.info(f"🟡 **AGUARDAR VOLUME:** Preço acima da média, mas sem força. Falta volume comprador.")
             elif distancia_media <= 1.0:
-                st.info(f'🟡 **NEUTRO (Margem Curta):** Preço "colado" na SMA 50. Sem margem de segurança.')
+                st.info(f'🟡 **NEUTRO (Margem Curta):** Preço muito próximo à SMA 50.')
             else:
-                st.info(f"🟡 **NEUTRO:** A SMA 50 perdeu inclinação positiva.")
+                st.info(f"🟡 **NEUTRO:** SMA 50 perdeu inclinação.")
         else:
-            st.error(f"🔴 **TENDÊNCIA DE BAIXA:** Preço abaixo da SMA 50. Proteja seu capital.")
+            st.error(f"🔴 **TENDÊNCIA DE BAIXA:** Preço abaixo da SMA 50.")
 
-        if max_90_180 > max_0_90 * 1.2:
-            st.warning(f"🚩 **CICLO DE QUEDA:** O pico de 180 dias é muito superior ao recente. Ativo em tendência macro de baixa.")
-            
         st.divider()
         
         # Ciclos de Resistência
@@ -140,8 +145,7 @@ if btn_analisar:
         c_p1.info(f"Pico 0-90 dias: {simbolo} {max_0_90:.4f} (Upside: {up_recente:.1f}%)")
         c_p2.info(f"Pico 90-180 dias: {simbolo} {max_90_180:.4f} (Upside: {up_antigo:.1f}%)")
         
-        valor_stop = preco_atual * (1 - (stop_loss_input / 100))
-        st.error(f"Stop Loss Sugerido: {simbolo} {valor_stop:.4f}")
-        st.caption(f"Análise via: {fonte} | Volume Médio 20d: {vol_med_20d:,.0f}")
+        st.error(f"Stop Loss Sugerido: {simbolo} {preco_atual * (1 - (stop_loss_input / 100)):.4f}")
+        st.caption(f"Análise: {fonte} | Méd. Volume {ref_volume}d: {vol_medio:,.0f}")
     else:
-        st.error(f"Erro: Ativo '{ticker_input}' não encontrado.")
+        st.error(f"Ativo '{ticker_input}' não encontrado.")
