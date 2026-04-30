@@ -3,17 +3,14 @@ import yfinance as yf
 import pandas as pd
 import requests
 
-st.set_page_config(page_title="Conselheiro Pro: Gestor V6.4", layout="wide")
+# Configuração da página
+st.set_page_config(page_title="Conselheiro Pro: Gestor V6.5", layout="wide")
 
 def resgate_coingecko(ticker):
-    # Mapa atualizado com os novos tokens do seu painel OKX
+    # Mapa de IDs para garantir que ativos novos da OKX sejam localizados
     ticker_map = {
-        "ZBT": "zerobase", 
-        "LINK": "chainlink", 
-        "ENJ": "enjincoin", 
-        "ORDI": "ordinals",
-        "BIO": "bio-protocol",  # ID provável para o BIO/USDT
-        "MEGA": "mega-token"    # ID provável para o MEGA/USDT
+        "ZBT": "zerobase", "LINK": "chainlink", "ENJ": "enjincoin", 
+        "ORDI": "ordinals", "BIO": "bio-protocol", "MEGA": "mega-token"
     }
     coin_id = ticker_map.get(ticker.upper(), ticker.lower())
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
@@ -31,18 +28,14 @@ def resgate_coingecko(ticker):
     except:
         return None
 
-# Na parte da Lógica Principal (após o cálculo da SMA50):
-if len(df) < 50:
-    st.warning(f"⚠️ **DADOS INSUFICIENTES:** O ativo {ticker_input} é muito recente. O Conselheiro precisa de 50 dias de histórico para calcular a tendência.")
-    st.stop() # Interrompe a execução para não travar o painel
-
 def buscar_dados_perfeitos(ticker, dias=180):
     original = ticker.upper().strip()
     y_ticker = f"{original}-USD" if "-" not in original and "." not in original and not any(char.isdigit() for char in original) else original
     try:
         data = yf.download(y_ticker, period=f"{dias}d", interval="1d", progress=False, auto_adjust=True)
         if not data.empty:
-            if isinstance(data.columns, pd.MultiIndex): data.columns = data.columns.get_level_values(0)
+            if isinstance(data.columns, pd.MultiIndex): 
+                data.columns = data.columns.get_level_values(0)
             return data, y_ticker
     except: pass
     data_resgate = resgate_coingecko(original)
@@ -58,24 +51,29 @@ def calcular_rsi(data, window=14):
 
 # --- Interface Lateral ---
 st.sidebar.header("⚙️ Parâmetros")
-ticker_input = st.sidebar.text_input("Ativo", "ORDI")
+ticker_input = st.sidebar.text_input("Ativo", "LINK")
 stop_loss_input = st.sidebar.number_input("Stop Loss (%)", value=5.0)
 ref_volume = st.sidebar.selectbox("Média de Volume", options=[1, 5, 20, 30], index=1)
 
 st.sidebar.divider()
 btn_analisar = st.sidebar.button("🚀 ANALISAR AGORA")
 
-st.title("🏢 Conselheiro Pro: Gestor de Posição V6.4")
+st.title("🏢 Conselheiro Pro: Gestor de Posição V6.5")
 st.divider()
 
 if btn_analisar:
     df, fonte = buscar_dados_perfeitos(ticker_input)
     if df is not None:
+        # TRAVA DE SEGURANÇA PARA ATIVOS RECENTES (BIO, MEGA, ETC)
+        if len(df) < 50:
+            st.warning(f"⚠️ **DADOS INSUFICIENTES:** O ativo {ticker_input} é muito recente ({len(df)} dias). O Conselheiro precisa de 50 dias de histórico para calcular a tendência de longo prazo (SMA 50).")
+            st.info("Para ativos novos, utilize o gráfico da OKX para análise visual de curto prazo.")
+            st.stop()
+
         preco_atual = float(df['Close'].iloc[-1])
         rsi_valor = float(calcular_rsi(df))
         
-        # --- CALIBRAÇÃO OKX (Volume Global vs Local) ---
-        # A OKX costuma representar ~20-35% do volume global de tokens menores.
+        # Lógica de Volume calibrada para OKX (~30% do global)
         fator_okx = 0.30 
         vol_fin_atual = float(df['Volume'].iloc[-1]) * fator_okx
         vol_fin_medio = float(df['Volume'].rolling(window=ref_volume).mean().iloc[-1]) * fator_okx
@@ -91,12 +89,7 @@ if btn_analisar:
         sma50_ant = float(df['SMA50'].iloc[-3])
         dist_media = ((preco_atual - sma50_at) / sma50_at) * 100
         
-        # Picos
-        df_rec = df.iloc[-90:]
-        max_90 = float(df_rec['High'].max())
-        df_ant = df.iloc[:-90] if len(df) > 90 else None
-        max_180 = float(df_ant['High'].max()) if df_ant is not None else max_90
-
+        # Dashboard Superior
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         col_m1.metric("Preço Atual", f"$ {preco_atual:.4f}")
         col_m2.metric("RSI (14d)", f"{rsi_valor:.1f}")
@@ -105,24 +98,29 @@ if btn_analisar:
         
         st.divider()
         if status_vol == "Baixo":
-            st.warning(f"📌 **GATILHO OKX:** Volume em tokens baixo. Para sinal VERDE, o 'Vol. 24h' na OKX deve superar **{vol_gatilho:,.0f}** unidades.")
+            st.warning(f"📌 **GATILHO OKX:** Para sinal VERDE, o 'Vol. 24h' na OKX deve superar **{vol_gatilho:,.0f}** unidades.")
         
-        # --- VERIFICAÇÃO ---
+        # Verificação de Entrada
         st.subheader("🛡️ Verificação de Entrada")
         if preco_atual > sma50_at:
             if status_vol != "Baixo" and sma50_at > sma50_ant and dist_media > 1.0:
                 st.success("🟢 **SINAL VERDE:** Tendência confirmada.")
             elif status_vol == "Baixo":
-                st.info("🟡 **AGUARDAR VOLUME:** Falta força compradora no momento.")
+                st.info("🟡 **AGUARDAR VOLUME:** Preço acima da média, mas falta força compradora.")
             else:
-                st.info("🟡 **NEUTRO:** Sem margem de segurança ou média lateral.")
+                st.info('🟡 **NEUTRO:** Preço "colado" na média ou tendência lateral.')
         else:
-            st.error("🔴 **TENDÊNCIA DE BAIXA:** Ativo abaixo da média de 50 dias.")
+            st.error("🔴 **TENDÊNCIA DE BAIXA:** Ativo operando abaixo da média de 50 dias.")
 
         st.divider()
         
-        # --- RESTAURAÇÃO DOS CICLOS E STOP LOSS ---
+        # Ciclos e Risco
         st.subheader("📊 Ciclos de Resistência e Risco")
+        df_rec = df.iloc[-90:]
+        max_90 = float(df_rec['High'].max())
+        df_ant = df.iloc[:-90] if len(df) > 90 else None
+        max_180 = float(df_ant['High'].max()) if df_ant is not None else max_90
+        
         up90 = ((max_90 - preco_atual) / preco_atual) * 100
         up180 = ((max_180 - preco_atual) / preco_atual) * 100
         
@@ -131,4 +129,6 @@ if btn_analisar:
         c2.info(f"Pico 90-180 dias: $ {max_180:.4f} (Upside: {up180:.1f}%)")
         
         st.error(f"⚠️ Stop Loss Sugerido: $ {preco_atual * (1 - (stop_loss_input / 100)):.4f}")
-        st.caption(f"Análise via: {fonte} | Gatilho calibrado para ~30% do volume global.")
+        st.caption(f"Análise: {fonte} | Gatilho calibrado para unidades de Token.")
+    else:
+        st.error(f"Ativo '{ticker_input}' não encontrado.")
