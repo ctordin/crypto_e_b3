@@ -1,137 +1,101 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import warnings
 
-warnings.filterwarnings('ignore')
+# Configuração da página
+st.set_page_config(page_title="Conselheiro B3: Gestor V6.5", layout="wide")
 
-# 1. Configuração da Página
-st.set_page_config(page_title="Conselheiro B3 Gestor", page_icon="🏢", layout="wide")
+def calcular_rsi(data, window=14):
+    close = data['Close']
+    delta = close.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss.replace(0, 0.001)
+    return (100 - (100 / (1 + rs))).iloc[-1]
 
-# ==========================================
-# 2. FUNÇÃO DE BUSCA BLINDADA
-# ==========================================
+# --- Interface Lateral ---
+st.sidebar.header("⚙️ Parâmetros B3")
+ticker_input = st.sidebar.text_input("Ação (ex: VALE3, PETR4)", "B3SA3")
+stop_loss_input = st.sidebar.number_input("Stop Loss desejado (%)", value=5.0)
+ref_volume = st.sidebar.selectbox("Média de Volume (Dias)", options=[1, 5, 20, 30], index=1)
 
-@st.cache_data(ttl=300)
-def buscar_dados_mercado(ticker_raw):
-    # Garante o sufixo .SA
-    t_yf = ticker_raw if ".SA" in ticker_raw.upper() else f"{ticker_raw.upper()}.SA"
-    
-    try:
-        # Download com auto_adjust para evitar colunas extras
-        df = yf.download(t_yf, period='250d', interval='1d', progress=False, auto_adjust=True)
-        
-        if df is None or df.empty:
-            return None
-        
-        # TRATAMENTO PARA SMTO3: Resolve o problema de colunas duplicadas (MultiIndex)
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        
-        df = df.copy().reset_index()
-        
-        # Padronização de Nomes
-        df.rename(columns={'Close': 'fechamento', 'Date': 'data', 'High': 'maxima', 'Volume': 'volume'}, inplace=True)
-        
-        # Força o fechamento a ser uma série única (evita erro de SMTO3)
-        if 'fechamento' in df.columns:
-            close_series = df['fechamento']
-            if len(close_series.shape) > 1:
-                close_series = close_series.iloc[:, 0]
-        else:
-            return None
+st.sidebar.divider()
+btn_analisar = st.sidebar.button("🚀 ANALISAR AGORA")
 
-        # --- INDICADORES TÉCNICOS ---
-        # RSI (14)
-        delta = close_series.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss.replace(0, 0.001)
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
-        # Média 50
-        df['sma_50'] = close_series.rolling(window=50).mean()
-        
-        # Limpa valores nulos dos cálculos
-        return df.dropna()
-    except Exception as e:
-        st.error(f"Erro ao processar {ticker_raw}: {e}")
-        return None
-
-# ==========================================
-# 3. INTERFACE LATERAL
-# ==========================================
-with st.sidebar:
-    st.header("⚙️ Parâmetros")
-    with st.form("form_gestor"):
-        SIMBOLO = st.text_input("Ação (ex: VALE3.SA)", value="SMTO3").upper().strip()
-        STOP_PCT = st.number_input("Stop Loss desejado (%)", value=5.0) / 100.0
-        RSI_MAX = st.number_input("RSI Máx. (Entrada)", value=55)
-        btn_analisar = st.form_submit_button("🚀 ANALISAR AGORA", use_container_width=True)
-
-# ==========================================
-# 4. PAINEL PRINCIPAL (LAYOUT CRYPTO)
-# ==========================================
-st.title("🏢 Conselheiro B3: Gestor de Posição")
+st.title("🏢 Conselheiro B3: Gestor de Posição V6.5")
+st.divider()
 
 if btn_analisar:
-    with st.spinner(f"Analisando {SIMBOLO}..."):
-        df = buscar_dados_mercado(SIMBOLO)
+    # Garante o sufixo .SA para a B3
+    ticker_final = ticker_input.upper().strip()
+    if ".SA" not in ticker_final:
+        ticker_final = f"{ticker_final}.SA"
+    
+    try:
+        df = yf.download(ticker_final, period="180d", interval="1d", progress=False, auto_adjust=True)
         
-        if df is not None:
-            atual = df.iloc[-1]
+        if not df.empty:
+            if isinstance(df.columns, pd.MultiIndex): 
+                df.columns = df.columns.get_level_values(0)
             
-            # Garantia de valores escalares para SMTO3
-            def to_float(val):
-                return float(val.iloc[0]) if hasattr(val, 'iloc') else float(val)
-
-            p_atual = to_float(atual['fechamento'])
-            rsi_val = to_float(atual['rsi'])
-            m50 = to_float(atual['sma_50'])
-            vol_atual = to_float(atual['volume'])
-            vol_medio = to_float(df['volume'].tail(20).mean())
+            preco_atual = float(df['Close'].iloc[-1])
+            rsi_valor = float(calcular_rsi(df))
             
-            max90 = to_float(df['maxima'].tail(90).max())
-            max180 = to_float(df['maxima'].tail(180).max())
+            # Lógica de Volume (Comparação Direta com a Média)
+            vol_atual = float(df['Volume'].iloc[-1])
+            vol_medio = float(df['Volume'].rolling(window=ref_volume).mean().iloc[-1])
+            vol_gatilho = vol_medio * 0.9
+            
+            status_vol = "Alto" if vol_atual > (vol_medio * 1.5) else "Baixo" if vol_atual < vol_gatilho else "Normal"
 
-            # --- VISUAL ---
-            c1, c2, c3 = st.columns(3)
-            c1.caption("Preço Atual")
-            c1.subheader(f"R$ {p_atual:.2f}")
-            c2.caption("RSI (14d)")
-            c2.subheader(f"{rsi_val:.1f}")
-            c3.caption("Volume")
-            c3.subheader("Alto" if vol_atual > vol_medio else "Normal")
-
+            df['SMA50'] = df['Close'].rolling(window=50).mean()
+            sma50_at = float(df['SMA50'].iloc[-1])
+            sma50_ant = float(df['SMA50'].iloc[-3])
+            dist_media = ((preco_atual - sma50_at) / sma50_at) * 100
+            
+            # Dashboard Superior (Igual ao Crypto)
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            col_m1.metric("Preço Atual", f"R$ {preco_atual:.2f}")
+            col_m2.metric("RSI (14d)", f"{rsi_valor:.1f}")
+            col_m3.metric(f"Vol. vs Méd.{ref_volume}d", status_vol)
+            col_m4.metric("SMA 50", f"R$ {sma50_at:.2f}")
+            
             st.divider()
+            
+            if status_vol == "Baixo":
+                st.warning(f"📌 **GATILHO DE VOLUME:** O volume atual está abaixo da média. Para sinal VERDE, o volume diário deve superar **{vol_gatilho:,.0f}**.")
 
-            st.markdown("### 📊 Radiografia do Mercado")
-            r1, r2 = st.columns(2)
-            r1.info(f"Máxima 90 dias: R$ {max90:.2f}")
-            r2.info(f"Máxima 180 dias: R$ {max180:.2f}")
-
-            # Parecer Técnico
-            if rsi_val > 70:
-                st.warning(f"🟡 SOBRECOMPRADO: RSI em {rsi_val:.1f}. Aguarde correção.")
-            elif p_atual > m50 and rsi_val < RSI_MAX:
-                st.success(f"🟢 COMPRA/APORTE: Tendência de alta confirmada.")
-            elif p_atual < m50:
-                st.error(f"🔴 TENDÊNCIA DE BAIXA: Preço abaixo da Média de 50 dias.")
+            # Verificação de Entrada
+            st.subheader("🛡️ Verificação de Entrada")
+            if preco_atual > sma50_at:
+                if status_vol != "Baixo" and sma50_at > sma50_ant and dist_media > 1.0:
+                    st.success("🟢 **SINAL VERDE:** Tendência de alta confirmada com volume e margem.")
+                elif status_vol == "Baixo":
+                    st.info("🟡 **AGUARDAR VOLUME:** Preço acima da média, mas falta força compradora.")
+                else:
+                    st.info("🟡 **NEUTRO:** Preço muito próximo da SMA 50 ou tendência lateral.")
             else:
-                st.info("🟡 NEUTRO: Aguarde definição de volume ou RSI.")
+                st.error("🔴 **TENDÊNCIA DE BAIXA:** Ativo operando abaixo da média de 50 dias.")
 
             st.divider()
-
-            st.markdown("### 💔 Gestão de Saída / Stop Loss")
-            v_stop = p_atual * (1 - STOP_PCT)
-            v_alvo = p_atual * 1.20 
             
-            g1, g2 = st.columns(2)
-            g1.error(f"Stop Loss Sugerido: R$ {v_stop:.2f}")
-            g2.success(f"Alvo Sugerido (+20%): R$ {v_alvo:.2f}")
-
-            dist_180 = ((max180 - p_atual) / max180) * 100
-            st.markdown(f"**Análise de Ciclo:** O preço atual está a **{dist_180:.1f}%** abaixo da máxima de 180 dias.")
-
+            # Ciclos de Resistência
+            st.subheader("📊 Ciclos de Resistência e Risco")
+            df_rec = df.iloc[-90:]
+            max_90 = float(df_rec['High'].max())
+            df_ant = df.iloc[:-90] if len(df) > 90 else None
+            max_180 = float(df_ant['High'].max()) if df_ant is not None else max_90
+            
+            up90 = ((max_90 - preco_atual) / preco_atual) * 100
+            up180 = ((max_180 - preco_atual) / preco_atual) * 100
+            
+            c1, c2 = st.columns(2)
+            c1.info(f"Pico 0-90 dias: R$ {max_90:.22f} (Upside: {up90:.1f}%)")
+            c2.info(f"Pico 90-180 dias: R$ {max_180:.2f} (Upside: {up180:.1f}%)")
+            
+            st.error(f"⚠️ Stop Loss Sugerido: R$ {preco_atual * (1 - (stop_loss_input / 100)):.2f}")
+            st.caption(f"Análise baseada em dados históricos da B3 (Yahoo Finance).")
         else:
-            st.error("Erro ao carregar dados. Verifique o ticker (ex: SMTO3 ou ALOS3).")
+            st.error("Ativo não encontrado. Verifique o ticker (ex: B3SA3).")
+    except Exception as e:
+        st.error(f"Erro ao processar dados: {e}")
