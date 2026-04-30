@@ -4,10 +4,10 @@ import pandas as pd
 import requests
 
 # Configuração da página
-st.set_page_config(page_title="Conselheiro Pro: Gestor de Risco V5", layout="wide")
+st.set_page_config(page_title="Conselheiro Pro: Gestor V6", layout="wide")
 
 def resgate_coingecko(ticker):
-    ticker_map = {"ZBT": "zerobase", "ZBT1": "zerobase", "RLS": "reals-network", "LINK": "chainlink"}
+    ticker_map = {"ZBT": "zerobase", "ZBT1": "zerobase", "RLS": "reals-network", "LINK": "chainlink", "ENJ": "enjincoin"}
     coin_id = ticker_map.get(ticker.upper(), ticker.lower())
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
     params = {'vs_currency': 'usd', 'days': '180', 'interval': 'daily'}
@@ -56,14 +56,14 @@ def calcular_rsi(data, window=14):
 
 # --- Interface Lateral ---
 st.sidebar.header("⚙️ Parâmetros de Entrada")
-ticker_input = st.sidebar.text_input("Ativo (ZBT, SOL, LINK, PETR4)", "LINK")
+ticker_input = st.sidebar.text_input("Ativo (ZBT, SOL, LINK, ENJ)", "LINK")
 stop_loss_input = st.sidebar.number_input("Stop Loss desejado (%)", value=5.0)
 
 st.sidebar.divider()
 btn_analisar = st.sidebar.button("🚀 ANALISAR AGORA")
 
 # --- Lógica Principal ---
-st.title("🏢 Conselheiro Pro: Gestor de Posição V5")
+st.title("🏢 Conselheiro Pro: Gestor de Posição V6")
 st.divider()
 
 if btn_analisar:
@@ -74,22 +74,20 @@ if btn_analisar:
         preco_atual = float(df['Close'].iloc[-1])
         rsi_valor = float(calcular_rsi(df))
         
-        # Volume
+        # Lógica de Volume
         vol_atual = float(df['Volume'].iloc[-1])
         vol_med_20d = float(df['Volume'].rolling(window=20).mean().iloc[-1])
-        op_vol = "Alto 📈" if vol_atual > (vol_med_20d * 1.5) else "Baixo 📉" if vol_atual < (vol_med_20d * 0.8) else "Normal ↔️"
+        status_vol = "Alto" if vol_atual > (vol_med_20d * 1.5) else "Baixo" if vol_atual < (vol_med_20d * 0.9) else "Normal"
 
         # SMA 50 e Inclinação
         df['SMA50'] = df['Close'].rolling(window=50).mean()
         sma50_at = float(df['SMA50'].iloc[-1])
         sma50_ant = float(df['SMA50'].iloc[-3])
+        distancia_media = ((preco_atual - sma50_at) / sma50_at) * 100
         
-        # --- LÓGICA DE PICOS INDIVIDUAIS (NOVO) ---
-        # Intervalo 1: 0 a 90 dias atrás
+        # Picos Segmentados
         df_recente = df.iloc[-90:] if len(df) >= 90 else df
         max_0_90 = float(df_recente['High'].max())
-        
-        # Intervalo 2: 91 a 180 dias atrás
         df_antigo = df.iloc[:-90] if len(df) >= 90 else None
         max_90_180 = float(df_antigo['High'].max()) if df_antigo is not None else max_0_90
         
@@ -98,45 +96,45 @@ if btn_analisar:
         simbolo = "$" if "-USD" in fonte or "CoinGecko" in fonte else "R$"
         col_m1.metric("Preço Atual", f"{simbolo} {preco_atual:.4f}")
         col_m2.metric("RSI (14d)", f"{rsi_valor:.1f}")
-        col_m3.metric("Volume", op_vol)
+        col_m3.metric("Volume", status_vol)
         col_m4.metric("SMA 50", f"{sma50_at:.4f}")
         
         st.divider()
         
-        # Verificação de Tendência
+        # --- FILTRO DE ENTRADA V6 (Cérebro do Robô) ---
+        st.subheader("🛡️ Verificação de Entrada e Tendência")
+        
         if preco_atual > sma50_at:
-            if sma50_at > sma50_ant:
+            # Condição para o Verde: Média subindo + Volume não ser baixo + Margem > 1%
+            if sma50_at > sma50_ant and status_vol != "Baixo" and distancia_media > 1.0:
                 if rsi_valor < 62:
-                    st.success(f"🟢 **SINAL VERDE:** Tendência de alta forte.")
+                    st.success(f"🟢 **SINAL VERDE:** Tendência de alta confirmada com volume e margem de segurança.")
                 else:
-                    st.warning(f"⚠️ **ALERTA:** Alta confirmada, mas RSI ({rsi_valor:.1f}) indica sobrecompra.")
+                    st.warning(f"⚠️ **ALERTA:** Tendência de alta, mas ativo muito esticado (RSI: {rsi_valor:.1f}).")
+            
+            # Condição de Cuidado (Caso atual da LINK)
+            elif status_vol == "Baixo":
+                st.info(f"🟡 **AGUARDAR (Volume Baixo):** O preço está acima da média, mas não há força compradora. Risco de queda.")
+            elif distancia_media <= 1.0:
+                st.info(f"🟡 **NEUTRO (Margem Curta):** O preço está "colado" na SMA 50 ({distancia_media:.2f}%). Sem margem de segurança.")
             else:
-                st.info(f"🟡 **NEUTRO:** Acima da média, mas SMA 50 perdeu inclinação.")
+                st.info(f"🟡 **NEUTRO:** A SMA 50 perdeu inclinação positiva.")
         else:
-            st.error(f"🔴 **TENDÊNCIA DE BAIXA:** Fique fora.")
+            st.error(f"🔴 **TENDÊNCIA DE BAIXA:** Preço abaixo da SMA 50. Proteja seu capital.")
+
+        if max_90_180 > max_0_90 * 1.2:
+            st.warning(f"🚩 **CICLO DE QUEDA:** O pico de 180 dias é muito superior ao recente. O ativo está em tendência macro de baixa.")
             
         st.divider()
         
-        # --- ANÁLISE DE PICOS SEGMENTADOS ---
-        st.subheader("📊 Ciclos de Resistência (Picos Segmentados)")
-        
-        up_recente = ((max_0_90 - preco_atual) / preco_atual) * 100
-        up_antigo = ((max_90_180 - preco_atual) / preco_atual) * 100
-        
+        # Picos e Risco
+        st.subheader("📊 Ciclos de Resistência e Risco")
         c_p1, c_p2 = st.columns(2)
-        with c_p1:
-            st.info(f"**Pico Recente (0-90 dias):** {simbolo} {max_0_90:.4f}")
-            st.write(f"Distância para o topo recente: **{up_recente:.1f}%**")
-        with c_p2:
-            st.info(f"**Pico Antigo (90-180 dias):** {simbolo} {max_90_180:.4f}")
-            st.write(f"Distância para o topo antigo: **{up_antigo:.1f}%**")
+        c_p1.info(f"Pico 0-90 dias: {simbolo} {max_0_90:.4f} (Upside: {((max_0_90-preco_atual)/preco_atual)*100:.1f}%)")
+        c_p2.info(f"Pico 90-180 dias: {simbolo} {max_90_180:.4f}")
         
-        st.divider()
-        
-        # Gestão de Saída
-        st.subheader("🛡️ Gestão de Risco")
         valor_stop = preco_atual * (1 - (stop_loss_input / 100))
         st.error(f"Stop Loss Sugerido: {simbolo} {valor_stop:.4f}")
-        st.caption(f"Dados processados via: {fonte}")
+        st.caption(f"Análise via: {fonte}")
     else:
-        st.error(f"Erro: Não encontrei dados para '{ticker_input}'.")
+        st.error(f"Erro: Ativo '{ticker_input}' não encontrado.")
