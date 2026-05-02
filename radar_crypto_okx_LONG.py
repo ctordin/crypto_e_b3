@@ -29,6 +29,7 @@ PORTFOLIO = {
     'POL/USDT': 'POL-USD',
     'ENJ/USDT': 'ENJ-USD',
     'XAUT/USDT': 'XAUT-USD',
+    'MON/USDT': 'MON-USD',
     'ORDI/USDT': 'ORDI-USD',
     'BASED/USDT': 'BASED-USD',
     'ZKJ/USDT': 'ZKJ-USD',
