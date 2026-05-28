@@ -34,6 +34,7 @@ PORTFOLIO = {
     'BASED/USDT': 'BASED-USD',
     'ZKJ/USDT': 'ZKJ-USD',
     'WLD/USDT': 'WLD-USD',
+    'OKB/USDT': 'OKB-USD',
     'TSM': 'TSM' # Alterado para o Radar entender que é Especial
 }
 
