@@ -36,6 +36,7 @@ PORTFOLIO = {
     'WLD/USDT': 'WLD-USD',
     'OKB/USDT': 'OKB-USD',
     'BCH/USDT': 'BCH-USD',
+    'TRON/USDT': 'TRON-USD',
     'TSM': 'TSM' # Alterado para o Radar entender que é Especial
 }
 
