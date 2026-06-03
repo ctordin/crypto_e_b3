@@ -37,6 +37,7 @@ PORTFOLIO = {
     'OKB/USDT': 'OKB-USD',
     'BCH/USDT': 'BCH-USD',
     'TRX/USDT': 'TRX-USD',
+    'NEAR/USDT': 'NEAR-USD',
     'TSM': 'TSM' # Alterado para o Radar entender que é Especial
 }
 
